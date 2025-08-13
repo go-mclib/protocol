@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const CredentialsFilePath = "mcbot-credentials.txt"
+const CredentialsFilePath = "mclib-credentials.txt"
 
 // TokenStore defines a simple interface to persist and retrieve a refresh token.
 type TokenStore interface {
@@ -21,7 +21,7 @@ type fileTokenStore struct {
 }
 
 // NewDefaultFileTokenStore returns a file-backed TokenStore that stores the refresh token
-// in mcbot-credentials.txt in the current working directory.
+// in mclib-credentials.txt in the current working directory.
 func NewDefaultFileTokenStore(clientID string) (TokenStore, error) {
 	if strings.TrimSpace(clientID) == "" {
 		return nil, errors.New("clientID is required for default token store")
