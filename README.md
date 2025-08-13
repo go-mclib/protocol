@@ -8,6 +8,16 @@ Note that this is a low-level library. It is used by the [go-mclib/client](https
 
 Also note that this library is not yet stable. The API is subject to change. The project is currently maintained by me ([@SKevo18](https://github.com/SKevo18)) and is not yet ready for production use. I will implement new features and bug fixes as my spare time allows, but I cannot guarantee that this project will not be left unmaintained.
 
+## Using the library in your project
+
+This project is still in its early stages, so there are no tagged releases yet. You can use the `@<protocol-version>` branch to get the latest changes. For example:
+
+```bash
+go get github.com/go-mclib/protocol@772
+```
+
+Replace `772` with the protocol version (branch) you want to use.
+
 ## Contributing
 
 Interested in learning more about the internals, or contributing to the project? Check out the [CONTRIBUTING.md](./CONTRIBUTING.md) file.
