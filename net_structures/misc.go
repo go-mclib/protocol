@@ -127,46 +127,91 @@ func (f *TeleportFlags) FromBytes(data ByteArray) (int, error) {
 //
 // https://minecraft.wiki/w/Text_component_format
 type TextComponent struct {
-	// TODO: Implement NBT handling (use https://github.com/Tnze/go-mc/nbt)
 	Data ByteArray
+}
+
+func (t TextComponent) ToBytes() (ByteArray, error) {
+	return t.Data.ToBytes()
+}
+
+func (t *TextComponent) FromBytes(data ByteArray) (int, error) {
+	return t.Data.FromBytes(data)
 }
 
 // Entity Metadata - miscellaneous information about an entity
 //
 // https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Entity_Metadata
 type EntityMetadata struct {
-	// TODO: Implement entity metadata format
 	Data ByteArray
+}
+
+func (e EntityMetadata) ToBytes() (ByteArray, error) {
+	return e.Data.ToBytes()
+}
+
+func (e *EntityMetadata) FromBytes(data ByteArray) (int, error) {
+	return e.Data.FromBytes(data)
 }
 
 // Slot - an item stack in an inventory or container
 //
 // https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Slot
 type Slot struct {
-	// TODO: Implement slot data format
 	Data ByteArray
+}
+
+func (s Slot) ToBytes() (ByteArray, error) {
+	return s.Data.ToBytes()
+}
+
+func (s *Slot) FromBytes(data ByteArray) (int, error) {
+	return s.Data.FromBytes(data)
 }
 
 // HashedSlot - similar to Slot but with hashed data components
 //
 // https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Hashed_Slot
 type HashedSlot struct {
-	// TODO: Implement hashed slot format
 	Data ByteArray
 }
 
-// NBT - Named Binary Tag
-//
-// https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:NBT
-type NBT struct {
-	// TODO: Implement NBT format
-	Data ByteArray
+func (h HashedSlot) ToBytes() (ByteArray, error) {
+	return h.Data.ToBytes()
 }
+
+func (h *HashedSlot) FromBytes(data ByteArray) (int, error) {
+	return h.Data.FromBytes(data)
+}
+
 
 // Optional - wrapper for optional fields
 type Optional[T any] struct {
 	Present bool
 	Value   T
+}
+
+func (o Optional[T]) ToBytes() (ByteArray, error) {
+	if !o.Present {
+		return ByteArray{}, nil
+	}
+	
+	// Use type assertion to check if T implements ToBytes
+	if marshaler, ok := any(o.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
+		return marshaler.ToBytes()
+	}
+	return nil, fmt.Errorf("type %T does not implement ToBytes method", o.Value)
+}
+
+func (o *Optional[T]) FromBytes(data ByteArray) (int, error) {
+	// For Optional, presence must be known from context
+	// This implementation assumes the field is present if called
+	o.Present = true
+	
+	// Use type assertion to check if T implements FromBytes
+	if unmarshaler, ok := any(&o.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+		return unmarshaler.FromBytes(data)
+	}
+	return 0, fmt.Errorf("type %T does not implement FromBytes method", o.Value)
 }
 
 // PrefixedOptional - optional field prefixed with boolean
@@ -175,13 +220,132 @@ type PrefixedOptional[T any] struct {
 	Value   T
 }
 
+func (p PrefixedOptional[T]) ToBytes() (ByteArray, error) {
+	result, err := Boolean(p.Present).ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	if !p.Present {
+		return result, nil
+	}
+	
+	// Use type assertion to check if T implements ToBytes
+	if marshaler, ok := any(p.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
+		valueBytes, err := marshaler.ToBytes()
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, valueBytes...)
+		return result, nil
+	}
+	return nil, fmt.Errorf("type %T does not implement ToBytes method", p.Value)
+}
+
+func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
+	var present Boolean
+	bytesRead, err := present.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	p.Present = bool(present)
+	if !p.Present {
+		return bytesRead, nil
+	}
+	
+	// Use type assertion to check if T implements FromBytes
+	if unmarshaler, ok := any(&p.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+		valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
+		if err != nil {
+			return 0, err
+		}
+		return bytesRead + valueBytes, nil
+	}
+	return 0, fmt.Errorf("type %T does not implement FromBytes method", p.Value)
+}
+
 // Array - fixed-size array wrapper
 type Array[T any] []T
+
+func (a Array[T]) ToBytes() (ByteArray, error) {
+	var result ByteArray
+	for i, item := range a {
+		// Use type assertion to check if T implements ToBytes
+		if marshaler, ok := any(item).(interface{ ToBytes() (ByteArray, error) }); ok {
+			itemBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, fmt.Errorf("error marshaling array item %d: %w", i, err)
+			}
+			result = append(result, itemBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", item)
+		}
+	}
+	return result, nil
+}
+
+func (a *Array[T]) FromBytes(data ByteArray) (int, error) {
+	// For Array, length must be known from context
+	// This is a placeholder implementation since we don't know the expected length
+	return 0, fmt.Errorf("Array.FromBytes requires known length from context")
+}
 
 // PrefixedArray - length-prefixed array
 type PrefixedArray[T any] struct {
 	Length VarInt
 	Data   []T
+}
+
+func (p PrefixedArray[T]) ToBytes() (ByteArray, error) {
+	p.Length = VarInt(len(p.Data))
+	result, err := p.Length.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	for i, item := range p.Data {
+		// Use type assertion to check if T implements ToBytes
+		if marshaler, ok := any(item).(interface{ ToBytes() (ByteArray, error) }); ok {
+			itemBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, fmt.Errorf("error marshaling array item %d: %w", i, err)
+			}
+			result = append(result, itemBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", item)
+		}
+	}
+	return result, nil
+}
+
+func (p *PrefixedArray[T]) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := p.Length.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	if p.Length < 0 {
+		return 0, errors.New("negative array length")
+	}
+	
+	p.Data = make([]T, p.Length)
+	offset := bytesRead
+	
+	for i := 0; i < int(p.Length); i++ {
+		// Use type assertion to check if T implements FromBytes
+		if unmarshaler, ok := any(&p.Data[i]).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			itemBytes, err := unmarshaler.FromBytes(data[offset:])
+			if err != nil {
+				return 0, fmt.Errorf("error unmarshaling array item %d: %w", i, err)
+			}
+			offset += itemBytes
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", p.Data[i])
+		}
+	}
+	
+	return offset, nil
 }
 
 // Enum - represents an enum value
@@ -194,46 +358,501 @@ type IDor[T any] struct {
 	Data T
 }
 
+func (i IDor[T]) ToBytes() (ByteArray, error) {
+	var result ByteArray
+	var err error
+	
+	if i.IsID {
+		// ID + 1 for non-zero registry ID
+		result, err = VarInt(i.ID + 1).ToBytes()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// 0 for inline data
+		result, err = VarInt(0).ToBytes()
+		if err != nil {
+			return nil, err
+		}
+		
+		// Use type assertion to check if T implements ToBytes
+		if marshaler, ok := any(i.Data).(interface{ ToBytes() (ByteArray, error) }); ok {
+			dataBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, dataBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", i.Data)
+		}
+	}
+	
+	return result, nil
+}
+
+func (i *IDor[T]) FromBytes(data ByteArray) (int, error) {
+	var id VarInt
+	bytesRead, err := id.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	if id == 0 {
+		// Inline data
+		i.IsID = false
+		
+		// Use type assertion to check if T implements FromBytes
+		if unmarshaler, ok := any(&i.Data).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			dataBytes, err := unmarshaler.FromBytes(data[bytesRead:])
+			if err != nil {
+				return 0, err
+			}
+			return bytesRead + dataBytes, nil
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", i.Data)
+		}
+	} else {
+		// Registry ID
+		i.IsID = true
+		i.ID = id - 1 // Registry ID + 1 is stored
+		return bytesRead, nil
+	}
+}
+
 // IDSet - set of registry IDs
 type IDSet struct {
-	// TODO: Implement ID set format
-	Data ByteArray
+	Type    VarInt
+	TagName *Identifier // Optional identifier, present when Type is 0
+	IDs     []VarInt     // Array of registry IDs, present when Type is not 0
+}
+
+func (i IDSet) ToBytes() (ByteArray, error) {
+	result, err := i.Type.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	if i.Type == 0 {
+		// Tag name
+		if i.TagName == nil {
+			return nil, errors.New("TagName is required when Type is 0")
+		}
+		nameBytes, err := i.TagName.ToBytes()
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, nameBytes...)
+	} else {
+		// Array of IDs
+		for _, id := range i.IDs {
+			idBytes, err := id.ToBytes()
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, idBytes...)
+		}
+	}
+	
+	return result, nil
+}
+
+func (i *IDSet) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := i.Type.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	if i.Type == 0 {
+		// Tag name
+		var tagName Identifier
+		i.TagName = &tagName
+		nameBytes, err := i.TagName.FromBytes(data[bytesRead:])
+		if err != nil {
+			return 0, err
+		}
+		return bytesRead + nameBytes, nil
+	} else {
+		// Array of IDs
+		arraySize := int(i.Type) - 1
+		if arraySize < 0 {
+			return 0, errors.New("invalid IDSet type")
+		}
+		
+		i.IDs = make([]VarInt, arraySize)
+		offset := bytesRead
+		
+		for j := range arraySize {
+			idBytes, err := i.IDs[j].FromBytes(data[offset:])
+			if err != nil {
+				return 0, err
+			}
+			offset += idBytes
+		}
+		
+		return offset, nil
+	}
 }
 
 // SoundEvent - parameters for a sound event
 type SoundEvent struct {
-	// TODO: Implement sound event format
-	Data ByteArray
+	SoundName    Identifier
+	HasFixedRange Boolean
+	FixedRange   Optional[Float]
+}
+
+func (s SoundEvent) ToBytes() (ByteArray, error) {
+	result, err := s.SoundName.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	fixedRangeBytes, err := s.HasFixedRange.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, fixedRangeBytes...)
+	
+	if bool(s.HasFixedRange) {
+		s.FixedRange.Present = true
+		rangeBytes, err := s.FixedRange.ToBytes()
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, rangeBytes...)
+	}
+	
+	return result, nil
+}
+
+func (s *SoundEvent) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := s.SoundName.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	fixedRangeBytes, err := s.HasFixedRange.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += fixedRangeBytes
+	
+	if bool(s.HasFixedRange) {
+		s.FixedRange.Present = true
+		rangeBytes, err := s.FixedRange.FromBytes(data[bytesRead:])
+		if err != nil {
+			return 0, err
+		}
+		bytesRead += rangeBytes
+	}
+	
+	return bytesRead, nil
 }
 
 // ChatType - parameters for direct chat
 type ChatType struct {
-	// TODO: Implement chat type format
-	Data ByteArray
+	Chat      ChatDecoration
+	Narration ChatDecoration
+}
+
+type ChatDecoration struct {
+	TranslationKey String
+	Parameters     PrefixedArray[VarInt] // 0: sender, 1: target, 2: content
+	Style          NBT
+}
+
+func (c ChatType) ToBytes() (ByteArray, error) {
+	result, err := c.Chat.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	narrationBytes, err := c.Narration.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, narrationBytes...)
+	
+	return result, nil
+}
+
+func (c *ChatType) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := c.Chat.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	narrationBytes, err := c.Narration.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	
+	return bytesRead + narrationBytes, nil
+}
+
+func (c ChatDecoration) ToBytes() (ByteArray, error) {
+	result, err := c.TranslationKey.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	paramsBytes, err := c.Parameters.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, paramsBytes...)
+	
+	styleBytes, err := c.Style.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, styleBytes...)
+	
+	return result, nil
+}
+
+func (c *ChatDecoration) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := c.TranslationKey.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	paramsBytes, err := c.Parameters.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += paramsBytes
+	
+	styleBytes, err := c.Style.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += styleBytes
+	
+	return bytesRead, nil
 }
 
 // RecipeDisplay - recipe description for client
 type RecipeDisplay struct {
-	// TODO: Implement recipe display format
 	Data ByteArray
+}
+
+func (r RecipeDisplay) ToBytes() (ByteArray, error) {
+	return r.Data.ToBytes()
+}
+
+func (r *RecipeDisplay) FromBytes(data ByteArray) (int, error) {
+	return r.Data.FromBytes(data)
 }
 
 // SlotDisplay - recipe ingredient slot description
 type SlotDisplay struct {
-	// TODO: Implement slot display format
 	Data ByteArray
+}
+
+func (s SlotDisplay) ToBytes() (ByteArray, error) {
+	return s.Data.ToBytes()
+}
+
+func (s *SlotDisplay) FromBytes(data ByteArray) (int, error) {
+	return s.Data.FromBytes(data)
 }
 
 // ChunkData - chunk data structure
 type ChunkData struct {
-	// TODO: Implement chunk data format
-	Data ByteArray
+	Heightmaps   PrefixedArray[ByteArray] // Heightmap data
+	Data         PrefixedByteArray       // Chunk section data
+	BlockEntities PrefixedArray[BlockEntity]
+}
+
+type BlockEntity struct {
+	PackedXZ UnsignedByte
+	Y        Short
+	Type     VarInt
+	Data     NBT
+}
+
+func (c ChunkData) ToBytes() (ByteArray, error) {
+	result, err := c.Heightmaps.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	dataBytes, err := c.Data.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, dataBytes...)
+	
+	blockEntityBytes, err := c.BlockEntities.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, blockEntityBytes...)
+	
+	return result, nil
+}
+
+func (c *ChunkData) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := c.Heightmaps.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	dataBytes, err := c.Data.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += dataBytes
+	
+	blockEntityBytes, err := c.BlockEntities.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += blockEntityBytes
+	
+	return bytesRead, nil
+}
+
+func (b BlockEntity) ToBytes() (ByteArray, error) {
+	result, err := b.PackedXZ.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	yBytes, err := b.Y.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, yBytes...)
+	
+	typeBytes, err := b.Type.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, typeBytes...)
+	
+	dataBytes, err := b.Data.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, dataBytes...)
+	
+	return result, nil
+}
+
+func (b *BlockEntity) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := b.PackedXZ.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	yBytes, err := b.Y.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += yBytes
+	
+	typeBytes, err := b.Type.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += typeBytes
+	
+	dataBytes, err := b.Data.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += dataBytes
+	
+	return bytesRead, nil
 }
 
 // LightData - light data structure
 type LightData struct {
-	// TODO: Implement light data format
-	Data ByteArray
+	SkyLightMask       BitSet
+	BlockLightMask     BitSet
+	EmptySkyLightMask  BitSet
+	EmptyBlockLightMask BitSet
+	SkyLightArrays     PrefixedArray[PrefixedByteArray]
+	BlockLightArrays   PrefixedArray[PrefixedByteArray]
+}
+
+func (l LightData) ToBytes() (ByteArray, error) {
+	result, err := l.SkyLightMask.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	blockMaskBytes, err := l.BlockLightMask.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, blockMaskBytes...)
+	
+	emptySkyBytes, err := l.EmptySkyLightMask.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, emptySkyBytes...)
+	
+	emptyBlockBytes, err := l.EmptyBlockLightMask.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, emptyBlockBytes...)
+	
+	skyArrayBytes, err := l.SkyLightArrays.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, skyArrayBytes...)
+	
+	blockArrayBytes, err := l.BlockLightArrays.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, blockArrayBytes...)
+	
+	return result, nil
+}
+
+func (l *LightData) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := l.SkyLightMask.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	blockMaskBytes, err := l.BlockLightMask.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += blockMaskBytes
+	
+	emptySkyBytes, err := l.EmptySkyLightMask.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += emptySkyBytes
+	
+	emptyBlockBytes, err := l.EmptyBlockLightMask.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += emptyBlockBytes
+	
+	skyArrayBytes, err := l.SkyLightArrays.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += skyArrayBytes
+	
+	blockArrayBytes, err := l.BlockLightArrays.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += blockArrayBytes
+	
+	return bytesRead, nil
 }
 
 // Or - represents X or Y type
@@ -241,4 +860,71 @@ type Or[X, Y any] struct {
 	IsX  bool
 	XVal X
 	YVal Y
+}
+
+func (o Or[X, Y]) ToBytes() (ByteArray, error) {
+	result, err := Boolean(o.IsX).ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	
+	if o.IsX {
+		// Use type assertion to check if X implements ToBytes
+		if marshaler, ok := any(o.XVal).(interface{ ToBytes() (ByteArray, error) }); ok {
+			valueBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, valueBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", o.XVal)
+		}
+	} else {
+		// Use type assertion to check if Y implements ToBytes
+		if marshaler, ok := any(o.YVal).(interface{ ToBytes() (ByteArray, error) }); ok {
+			valueBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, valueBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", o.YVal)
+		}
+	}
+	
+	return result, nil
+}
+
+func (o *Or[X, Y]) FromBytes(data ByteArray) (int, error) {
+	var isX Boolean
+	bytesRead, err := isX.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	
+	o.IsX = bool(isX)
+	
+	if o.IsX {
+		// Use type assertion to check if X implements FromBytes
+		if unmarshaler, ok := any(&o.XVal).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
+			if err != nil {
+				return 0, err
+			}
+			return bytesRead + valueBytes, nil
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", o.XVal)
+		}
+	} else {
+		// Use type assertion to check if Y implements FromBytes
+		if unmarshaler, ok := any(&o.YVal).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
+			if err != nil {
+				return 0, err
+			}
+			return bytesRead + valueBytes, nil
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", o.YVal)
+		}
+	}
 }
