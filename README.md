@@ -2,7 +2,7 @@
 
 Minimal Go bindings for the Minecraft server protocol.
 
-Currently, it maps a handful of serverbound (C2S) packets for Minecraft: Java Edition 1.21.8 (protocol version 772). See the [`java_protocol/packets`](java_protocol/packets) package.
+For packet mappings, see [go-mclib/data](https://github.com/go-mclib/data/tree/main/go/772/java_packets)
 
 Note that this is a low-level library. It is used by the [go-mclib/client](https://github.com/go-mclib/client) repository to implement the client side of the protocol with a higher-level API. If you are looking to create a Minecraft (CLI) client, you should check that repository instead.
 

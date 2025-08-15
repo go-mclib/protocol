@@ -46,12 +46,12 @@ func NewUUID(s string) (UUID, error) {
 	if len(s) != 32 {
 		return u, fmt.Errorf("invalid UUID length: expected 32 hex characters, got %d", len(s))
 	}
-	
+
 	bytes, err := hex.DecodeString(s)
 	if err != nil {
 		return u, fmt.Errorf("invalid UUID format: %w", err)
 	}
-	
+
 	copy(u[:], bytes)
 	return u, nil
 }

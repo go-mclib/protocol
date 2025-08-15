@@ -15,9 +15,10 @@ The codebase is written in Go, formatted with `go fmt`. It is divided into the f
 - [`auth`](./auth/): Handles authentication through Microsoft's OAuth2 flow. [Learn how to obtain a client ID here](https://minecraft.wiki/w/Microsoft_authentication#Microsoft_OAuth2_flow);
 - [`crypto`](./crypto/): Contains utilities for cryptography (SHA1 hash generation, CFB8 implementation, network encryption, etc.);
 - [`java_protocol`](./java_protocol/): Contains core utilities for the Java Edition protocol, like packet serialization and deserialization;
-- [`java_protocol/packets`](./java_protocol/packets/): Concrete packet structs for the given branch (currently: `772` for 1.21.8);
 - [`net_structures`](./net_structures/): Implementation and parsing for network structures used in Minecraft protocol (`VarInt`, `VarLong`, `UUID`, etc.);
 - [`session_server`](./session_server/): Handles communication with [Mojang's session server](https://minecraft.wiki/w/Mojang_API#Verify_login_session_on_client) (`sessionserver.mojang.com`);
+
+For packet mappings, see [go-mclib/data](https://github.com/go-mclib/data/tree/main/go/772/java_packets).
 
 Try to make the codebase relatively readable, modular, easy to understand/maintain and test. The code should be well-documented, with references to the Minecraft wiki where applicable.
 
