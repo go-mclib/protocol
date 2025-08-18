@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -265,7 +266,6 @@ func (p PrefixedOptional[T]) ToBytes() (ByteArray, error) {
 		return result, nil
 	}
 
-	// Use type assertion to check if T implements ToBytes
 	if marshaler, ok := any(p.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
 		valueBytes, err := marshaler.ToBytes()
 		if err != nil {
@@ -274,6 +274,24 @@ func (p PrefixedOptional[T]) ToBytes() (ByteArray, error) {
 		result = append(result, valueBytes...)
 		return result, nil
 	}
+
+	val := reflect.ValueOf(p.Value)
+	if val.Kind() == reflect.Array {
+		for i := range val.Len() {
+			elem := val.Index(i).Interface()
+			if marshaler, ok := elem.(interface{ ToBytes() (ByteArray, error) }); ok {
+				elemBytes, err := marshaler.ToBytes()
+				if err != nil {
+					return nil, fmt.Errorf("error marshaling array element %d: %w", i, err)
+				}
+				result = append(result, elemBytes...)
+			} else {
+				return nil, fmt.Errorf("array element type %T does not implement ToBytes method", elem)
+			}
+		}
+		return result, nil
+	}
+
 	return nil, fmt.Errorf("type %T does not implement ToBytes method", p.Value)
 }
 
@@ -289,7 +307,6 @@ func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
 		return bytesRead, nil
 	}
 
-	// Use type assertion to check if T implements FromBytes
 	if unmarshaler, ok := any(&p.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 		valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
 		if err != nil {
@@ -297,6 +314,30 @@ func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
 		}
 		return bytesRead + valueBytes, nil
 	}
+
+	val := reflect.ValueOf(&p.Value).Elem()
+	if val.Kind() == reflect.Array {
+		totalRead := bytesRead
+		for i := 0; i < val.Len(); i++ {
+			elem := val.Index(i)
+			if elem.CanAddr() {
+				elemPtr := elem.Addr().Interface()
+				if unmarshaler, ok := elemPtr.(interface{ FromBytes(ByteArray) (int, error) }); ok {
+					read, err := unmarshaler.FromBytes(data[totalRead:])
+					if err != nil {
+						return 0, fmt.Errorf("error unmarshaling array element %d: %w", i, err)
+					}
+					totalRead += read
+				} else {
+					return 0, fmt.Errorf("array element type %T does not implement FromBytes method", elem.Interface())
+				}
+			} else {
+				return 0, fmt.Errorf("cannot take address of array element %d", i)
+			}
+		}
+		return totalRead, nil
+	}
+
 	return 0, fmt.Errorf("type %T does not implement FromBytes method", p.Value)
 }
 
