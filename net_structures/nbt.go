@@ -2,7 +2,9 @@ package net_structures
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Tnze/go-mc/nbt"
 )
@@ -32,7 +34,7 @@ func (n NBT) ToBytes() (ByteArray, error) {
 	var buf bytes.Buffer
 	encoder := nbt.NewEncoder(&buf)
 	encoder.NetworkFormat(true)
-	
+
 	err := encoder.Encode(n.Data, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode NBT data: %w", err)
@@ -81,13 +83,21 @@ func (n *NBT) DecodeTo(dest any) error {
 	reader := bytes.NewReader(encoded)
 	decoder := nbt.NewDecoder(reader)
 	decoder.NetworkFormat(true)
-	
+
 	_, err = decoder.Decode(dest)
 	if err != nil {
 		return fmt.Errorf("failed to decode NBT to specific type: %w", err)
 	}
 
 	return nil
+}
+
+// GetAsString attempts to get NBT data as a readable string
+func (n NBT) GetAsString() string {
+	if text := n.ExtractTextFromNBT(); text != "" {
+		return text
+	}
+	return n.String()
 }
 
 // EncodeFrom encodes data from the provided source into this NBT
@@ -107,4 +117,87 @@ func (n NBT) String() string {
 		return "NBT{empty}"
 	}
 	return fmt.Sprintf("NBT{%+v}", n.Data)
+}
+
+// ExtractTextFromNBT attempts to extract readable text from NBT data
+// This is useful for chat components stored as NBT
+func (n NBT) ExtractTextFromNBT() string {
+	if n.Data == nil {
+		return ""
+	}
+
+	switch data := n.Data.(type) {
+	case map[string]any:
+		return extractTextFromMap(data)
+	case string:
+		return data
+	default:
+		return fmt.Sprintf("%v", data)
+	}
+}
+
+// extractTextFromMap recursively extracts text from a map structure
+func extractTextFromMap(data map[string]any) string {
+	var result strings.Builder
+
+	if text, ok := data["text"].(string); ok {
+		result.WriteString(text)
+	}
+
+	if translate, ok := data["translate"].(string); ok {
+		result.WriteString(translate)
+		if with, ok := data["with"].([]any); ok {
+			result.WriteString(" [")
+			for i, arg := range with {
+				if i > 0 {
+					result.WriteString(", ")
+				}
+				if argMap, ok := arg.(map[string]any); ok {
+					result.WriteString(extractTextFromMap(argMap))
+				} else {
+					result.WriteString(fmt.Sprintf("%v", arg))
+				}
+			}
+			result.WriteString("]")
+		}
+	}
+
+	if extra, ok := data["extra"].([]any); ok {
+		for _, item := range extra {
+			if itemMap, ok := item.(map[string]any); ok {
+				result.WriteString(extractTextFromMap(itemMap))
+			}
+		}
+	}
+
+	if result.Len() == 0 {
+		for key, value := range data {
+			if strings.Contains(strings.ToLower(key), "text") || strings.Contains(strings.ToLower(key), "message") {
+				if str, ok := value.(string); ok {
+					result.WriteString(str)
+					break
+				}
+			}
+		}
+	}
+
+	return result.String()
+}
+
+// ParseAsTextComponent attempts to parse NBT data as a text component
+func (n NBT) ParseAsTextComponent() (*ChatTextComponent, error) {
+	if n.Data == nil {
+		return nil, fmt.Errorf("NBT data is nil")
+	}
+
+	jsonBytes, err := json.Marshal(n.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert NBT to JSON: %w", err)
+	}
+
+	component, err := ParseTextComponentFromString(string(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	return &component, nil
 }

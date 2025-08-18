@@ -30,7 +30,7 @@ func marshalStruct(val reflect.Value) (ns.ByteArray, error) {
 	var result ns.ByteArray
 	typ := val.Type()
 
-	for i := 0; i < val.NumField(); i++ {
+	for i := range val.NumField() {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
@@ -97,7 +97,7 @@ func marshalField(field reflect.Value) (ns.ByteArray, error) {
 		}
 
 		result := lengthBytes
-		for j := 0; j < length; j++ {
+		for j := range length {
 			elemBytes, err := marshalField(field.Index(j))
 			if err != nil {
 				return nil, err
@@ -109,7 +109,7 @@ func marshalField(field reflect.Value) (ns.ByteArray, error) {
 	case reflect.Array:
 		// fixed-size arrays don't encode length
 		var result ns.ByteArray
-		for j := 0; j < field.Len(); j++ {
+		for j := range field.Len() {
 			elemBytes, err := marshalField(field.Index(j))
 			if err != nil {
 				return nil, err
@@ -143,7 +143,7 @@ func unmarshalStruct(val reflect.Value, data ns.ByteArray) (int, error) {
 	typ := val.Type()
 	offset := 0
 
-	for i := 0; i < val.NumField(); i++ {
+	for i := range val.NumField() {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 
@@ -225,7 +225,7 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 
 		// create slice
 		slice := reflect.MakeSlice(field.Type(), int(length), int(length))
-		for j := 0; j < int(length); j++ {
+		for j := range int(length) {
 			bytesConsumed, err := unmarshalField(slice.Index(j), data[offset:])
 			if err != nil {
 				return offset, err
@@ -238,7 +238,7 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 	case reflect.Array:
 		// fixed-size arrays
 		offset := 0
-		for j := 0; j < field.Len(); j++ {
+		for j := range field.Len() {
 			bytesConsumed, err := unmarshalField(field.Index(j), data[offset:])
 			if err != nil {
 				return offset, err

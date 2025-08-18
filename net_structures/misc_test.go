@@ -216,39 +216,39 @@ func TestPrefixedOptional(t *testing.T) {
 			Present: true,
 			Value:   42,
 		}
-		
+
 		data, err := val.ToBytes()
 		if err != nil {
 			t.Errorf("PrefixedOptional.ToBytes() error = %v", err)
 		}
-		
+
 		var result ns.PrefixedOptional[ns.VarInt]
 		_, err = result.FromBytes(data)
 		if err != nil {
 			t.Errorf("PrefixedOptional.FromBytes() error = %v", err)
 		}
-		
+
 		if result.Present != val.Present || result.Value != val.Value {
 			t.Errorf("PrefixedOptional roundtrip: got %+v, want %+v", result, val)
 		}
 	})
-	
+
 	t.Run("not present", func(t *testing.T) {
 		val := ns.PrefixedOptional[ns.VarInt]{
 			Present: false,
 		}
-		
+
 		data, err := val.ToBytes()
 		if err != nil {
 			t.Errorf("PrefixedOptional.ToBytes() error = %v", err)
 		}
-		
+
 		var result ns.PrefixedOptional[ns.VarInt]
 		_, err = result.FromBytes(data)
 		if err != nil {
 			t.Errorf("PrefixedOptional.FromBytes() error = %v", err)
 		}
-		
+
 		if result.Present != val.Present {
 			t.Errorf("PrefixedOptional roundtrip: got Present=%v, want Present=%v", result.Present, val.Present)
 		}
@@ -256,32 +256,26 @@ func TestPrefixedOptional(t *testing.T) {
 }
 
 func TestPrefixedArray(t *testing.T) {
-	val := ns.PrefixedArray[ns.VarInt]{
-		Data: []ns.VarInt{1, 2, 3, 42, 1000},
-	}
-	
+	val := ns.PrefixedArray[ns.VarInt]{1, 2, 3, 42, 1000}
+
 	data, err := val.ToBytes()
 	if err != nil {
 		t.Errorf("PrefixedArray.ToBytes() error = %v", err)
 	}
-	
+
 	var result ns.PrefixedArray[ns.VarInt]
 	_, err = result.FromBytes(data)
 	if err != nil {
 		t.Errorf("PrefixedArray.FromBytes() error = %v", err)
 	}
-	
-	if result.Length != ns.VarInt(len(val.Data)) {
-		t.Errorf("PrefixedArray length: got %v, want %v", result.Length, len(val.Data))
+
+	if len(result) != len(val) {
+		t.Errorf("PrefixedArray length: got %v, want %v", len(result), len(val))
 	}
-	
-	if len(result.Data) != len(val.Data) {
-		t.Errorf("PrefixedArray data length: got %v, want %v", len(result.Data), len(val.Data))
-	}
-	
-	for i, v := range val.Data {
-		if result.Data[i] != v {
-			t.Errorf("PrefixedArray data[%d]: got %v, want %v", i, result.Data[i], v)
+
+	for i, v := range val {
+		if result[i] != v {
+			t.Errorf("PrefixedArray data[%d]: got %v, want %v", i, result[i], v)
 		}
 	}
 }
@@ -292,40 +286,40 @@ func TestIDor(t *testing.T) {
 			IsID: true,
 			ID:   123,
 		}
-		
+
 		data, err := val.ToBytes()
 		if err != nil {
 			t.Errorf("IDor.ToBytes() error = %v", err)
 		}
-		
+
 		var result ns.IDor[ns.VarInt]
 		_, err = result.FromBytes(data)
 		if err != nil {
 			t.Errorf("IDor.FromBytes() error = %v", err)
 		}
-		
+
 		if result.IsID != val.IsID || result.ID != val.ID {
 			t.Errorf("IDor roundtrip: got %+v, want %+v", result, val)
 		}
 	})
-	
+
 	t.Run("inline data", func(t *testing.T) {
 		val := ns.IDor[ns.VarInt]{
 			IsID: false,
 			Data: 456,
 		}
-		
+
 		data, err := val.ToBytes()
 		if err != nil {
 			t.Errorf("IDor.ToBytes() error = %v", err)
 		}
-		
+
 		var result ns.IDor[ns.VarInt]
 		_, err = result.FromBytes(data)
 		if err != nil {
 			t.Errorf("IDor.FromBytes() error = %v", err)
 		}
-		
+
 		if result.IsID != val.IsID || result.Data != val.Data {
 			t.Errorf("IDor roundtrip: got %+v, want %+v", result, val)
 		}
@@ -338,40 +332,40 @@ func TestOr(t *testing.T) {
 			IsX:  true,
 			XVal: 42,
 		}
-		
+
 		data, err := val.ToBytes()
 		if err != nil {
 			t.Errorf("Or.ToBytes() error = %v", err)
 		}
-		
+
 		var result ns.Or[ns.VarInt, ns.String]
 		_, err = result.FromBytes(data)
 		if err != nil {
 			t.Errorf("Or.FromBytes() error = %v", err)
 		}
-		
+
 		if result.IsX != val.IsX || result.XVal != val.XVal {
 			t.Errorf("Or roundtrip: got %+v, want %+v", result, val)
 		}
 	})
-	
+
 	t.Run("Y type", func(t *testing.T) {
 		val := ns.Or[ns.VarInt, ns.String]{
 			IsX:  false,
 			YVal: "hello",
 		}
-		
+
 		data, err := val.ToBytes()
 		if err != nil {
 			t.Errorf("Or.ToBytes() error = %v", err)
 		}
-		
+
 		var result ns.Or[ns.VarInt, ns.String]
 		_, err = result.FromBytes(data)
 		if err != nil {
 			t.Errorf("Or.FromBytes() error = %v", err)
 		}
-		
+
 		if result.IsX != val.IsX || result.YVal != val.YVal {
 			t.Errorf("Or roundtrip: got %+v, want %+v", result, val)
 		}
@@ -382,22 +376,22 @@ func TestTextComponent(t *testing.T) {
 	val := ns.TextComponent{
 		Data: ns.ByteArray{0x01, 0x02, 0x03, 0x04},
 	}
-	
+
 	data, err := val.ToBytes()
 	if err != nil {
 		t.Errorf("TextComponent.ToBytes() error = %v", err)
 	}
-	
+
 	var result ns.TextComponent
 	_, err = result.FromBytes(data)
 	if err != nil {
 		t.Errorf("TextComponent.FromBytes() error = %v", err)
 	}
-	
+
 	if len(result.Data) != len(val.Data) {
 		t.Errorf("TextComponent data length: got %v, want %v", len(result.Data), len(val.Data))
 	}
-	
+
 	for i, b := range val.Data {
 		if result.Data[i] != b {
 			t.Errorf("TextComponent data[%d]: got %02x, want %02x", i, result.Data[i], b)
@@ -409,22 +403,22 @@ func TestEntityMetadata(t *testing.T) {
 	val := ns.EntityMetadata{
 		Data: ns.ByteArray{0xAA, 0xBB, 0xCC},
 	}
-	
+
 	data, err := val.ToBytes()
 	if err != nil {
 		t.Errorf("EntityMetadata.ToBytes() error = %v", err)
 	}
-	
+
 	var result ns.EntityMetadata
 	_, err = result.FromBytes(data)
 	if err != nil {
 		t.Errorf("EntityMetadata.FromBytes() error = %v", err)
 	}
-	
+
 	if len(result.Data) != len(val.Data) {
 		t.Errorf("EntityMetadata data length: got %v, want %v", len(result.Data), len(val.Data))
 	}
-	
+
 	for i, b := range val.Data {
 		if result.Data[i] != b {
 			t.Errorf("EntityMetadata data[%d]: got %02x, want %02x", i, result.Data[i], b)

@@ -127,7 +127,9 @@ func (f *TeleportFlags) FromBytes(data ByteArray) (int, error) {
 //
 // https://minecraft.wiki/w/Text_component_format
 type TextComponent struct {
-	Data ByteArray
+	Data      ByteArray
+	parsedNBT *NBT
+	text      string
 }
 
 func (t TextComponent) ToBytes() (ByteArray, error) {
@@ -135,7 +137,41 @@ func (t TextComponent) ToBytes() (ByteArray, error) {
 }
 
 func (t *TextComponent) FromBytes(data ByteArray) (int, error) {
-	return t.Data.FromBytes(data)
+	bytesRead, err := t.Data.FromBytes(data)
+	if err != nil {
+		return bytesRead, err
+	}
+
+	var nbt NBT
+	if _, nbtErr := nbt.FromBytes(t.Data); nbtErr == nil {
+		t.parsedNBT = &nbt
+		t.text = nbt.ExtractTextFromNBT()
+	} else {
+		var str String
+		if _, strErr := str.FromBytes(t.Data); strErr == nil {
+			t.text = string(str)
+		}
+	}
+
+	return bytesRead, err
+}
+
+// GetText returns the extracted text from the component
+func (t TextComponent) GetText() string {
+	return t.text
+}
+
+// GetNBT returns the parsed NBT data (may be nil)
+func (t TextComponent) GetNBT() *NBT {
+	return t.parsedNBT
+}
+
+// String returns the text content
+func (t TextComponent) String() string {
+	if t.text != "" {
+		return t.text
+	}
+	return "<empty text component>"
 }
 
 // Entity Metadata - miscellaneous information about an entity
@@ -183,7 +219,6 @@ func (h *HashedSlot) FromBytes(data ByteArray) (int, error) {
 	return h.Data.FromBytes(data)
 }
 
-
 // Optional - wrapper for optional fields
 type Optional[T any] struct {
 	Present bool
@@ -194,7 +229,7 @@ func (o Optional[T]) ToBytes() (ByteArray, error) {
 	if !o.Present {
 		return ByteArray{}, nil
 	}
-	
+
 	// Use type assertion to check if T implements ToBytes
 	if marshaler, ok := any(o.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
 		return marshaler.ToBytes()
@@ -206,7 +241,7 @@ func (o *Optional[T]) FromBytes(data ByteArray) (int, error) {
 	// For Optional, presence must be known from context
 	// This implementation assumes the field is present if called
 	o.Present = true
-	
+
 	// Use type assertion to check if T implements FromBytes
 	if unmarshaler, ok := any(&o.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 		return unmarshaler.FromBytes(data)
@@ -225,11 +260,11 @@ func (p PrefixedOptional[T]) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if !p.Present {
 		return result, nil
 	}
-	
+
 	// Use type assertion to check if T implements ToBytes
 	if marshaler, ok := any(p.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
 		valueBytes, err := marshaler.ToBytes()
@@ -248,12 +283,12 @@ func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	p.Present = bool(present)
 	if !p.Present {
 		return bytesRead, nil
 	}
-	
+
 	// Use type assertion to check if T implements FromBytes
 	if unmarshaler, ok := any(&p.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 		valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
@@ -270,8 +305,18 @@ type Array[T any] []T
 
 func (a Array[T]) ToBytes() (ByteArray, error) {
 	var result ByteArray
+
+	if _, isByte := any(a).(Array[Byte]); isByte {
+		bytes := make([]byte, len(a))
+		for i := range a {
+			if b, ok := any(a[i]).(Byte); ok {
+				bytes[i] = byte(b)
+			}
+		}
+		return ByteArray(bytes), nil
+	}
+
 	for i, item := range a {
-		// Use type assertion to check if T implements ToBytes
 		if marshaler, ok := any(item).(interface{ ToBytes() (ByteArray, error) }); ok {
 			itemBytes, err := marshaler.ToBytes()
 			if err != nil {
@@ -285,26 +330,40 @@ func (a Array[T]) ToBytes() (ByteArray, error) {
 	return result, nil
 }
 
-func (a *Array[T]) FromBytes(data ByteArray) (int, error) {
-	// For Array, length must be known from context
-	// This is a placeholder implementation since we don't know the expected length
-	return 0, fmt.Errorf("Array.FromBytes requires known length from context")
+func (a *Array[T]) FromBytes(data ByteArray, length int) (int, error) {
+	*a = make(Array[T], length)
+	for i := range length {
+		if b, ok := any(Byte(data[i])).(T); ok {
+			(*a)[i] = b
+		}
+	}
+	return length, nil
 }
 
 // PrefixedArray - length-prefixed array
-type PrefixedArray[T any] struct {
-	Length VarInt
-	Data   []T
-}
+type PrefixedArray[T any] []T
 
 func (p PrefixedArray[T]) ToBytes() (ByteArray, error) {
-	p.Length = VarInt(len(p.Data))
-	result, err := p.Length.ToBytes()
+	// Automatically determine length from the data
+	length := VarInt(len(p))
+	result, err := length.ToBytes()
 	if err != nil {
 		return nil, err
 	}
-	
-	for i, item := range p.Data {
+
+	// Special handling for byte arrays
+	if _, isByte := any(p).(PrefixedArray[Byte]); isByte {
+		bytes := make([]byte, len(p))
+		for i := range p {
+			if b, ok := any(p[i]).(Byte); ok {
+				bytes[i] = byte(b)
+			}
+		}
+		result = append(result, bytes...)
+		return result, nil
+	}
+
+	for i, item := range p {
 		// Use type assertion to check if T implements ToBytes
 		if marshaler, ok := any(item).(interface{ ToBytes() (ByteArray, error) }); ok {
 			itemBytes, err := marshaler.ToBytes()
@@ -320,31 +379,46 @@ func (p PrefixedArray[T]) ToBytes() (ByteArray, error) {
 }
 
 func (p *PrefixedArray[T]) FromBytes(data ByteArray) (int, error) {
-	bytesRead, err := p.Length.FromBytes(data)
+	var length VarInt
+	bytesRead, err := length.FromBytes(data)
 	if err != nil {
 		return 0, err
 	}
-	
-	if p.Length < 0 {
+
+	if length < 0 {
 		return 0, errors.New("negative array length")
 	}
-	
-	p.Data = make([]T, p.Length)
+
+	// Special handling for byte arrays
+	if _, isByte := any(*p).(PrefixedArray[Byte]); isByte {
+		if len(data) < bytesRead+int(length) {
+			return 0, errors.New("insufficient data for byte array")
+		}
+		*p = make(PrefixedArray[T], length)
+		for i := 0; i < int(length); i++ {
+			if b, ok := any(Byte(data[bytesRead+i])).(T); ok {
+				(*p)[i] = b
+			}
+		}
+		return bytesRead + int(length), nil
+	}
+
+	*p = make(PrefixedArray[T], length)
 	offset := bytesRead
-	
-	for i := 0; i < int(p.Length); i++ {
+
+	for i := 0; i < int(length); i++ {
 		// Use type assertion to check if T implements FromBytes
-		if unmarshaler, ok := any(&p.Data[i]).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+		if unmarshaler, ok := any(&(*p)[i]).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 			itemBytes, err := unmarshaler.FromBytes(data[offset:])
 			if err != nil {
 				return 0, fmt.Errorf("error unmarshaling array item %d: %w", i, err)
 			}
 			offset += itemBytes
 		} else {
-			return 0, fmt.Errorf("type %T does not implement FromBytes method", p.Data[i])
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", (*p)[i])
 		}
 	}
-	
+
 	return offset, nil
 }
 
@@ -361,7 +435,7 @@ type IDor[T any] struct {
 func (i IDor[T]) ToBytes() (ByteArray, error) {
 	var result ByteArray
 	var err error
-	
+
 	if i.IsID {
 		// ID + 1 for non-zero registry ID
 		result, err = VarInt(i.ID + 1).ToBytes()
@@ -374,7 +448,7 @@ func (i IDor[T]) ToBytes() (ByteArray, error) {
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Use type assertion to check if T implements ToBytes
 		if marshaler, ok := any(i.Data).(interface{ ToBytes() (ByteArray, error) }); ok {
 			dataBytes, err := marshaler.ToBytes()
@@ -386,7 +460,7 @@ func (i IDor[T]) ToBytes() (ByteArray, error) {
 			return nil, fmt.Errorf("type %T does not implement ToBytes method", i.Data)
 		}
 	}
-	
+
 	return result, nil
 }
 
@@ -396,11 +470,11 @@ func (i *IDor[T]) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	if id == 0 {
 		// Inline data
 		i.IsID = false
-		
+
 		// Use type assertion to check if T implements FromBytes
 		if unmarshaler, ok := any(&i.Data).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 			dataBytes, err := unmarshaler.FromBytes(data[bytesRead:])
@@ -423,7 +497,7 @@ func (i *IDor[T]) FromBytes(data ByteArray) (int, error) {
 type IDSet struct {
 	Type    VarInt
 	TagName *Identifier // Optional identifier, present when Type is 0
-	IDs     []VarInt     // Array of registry IDs, present when Type is not 0
+	IDs     []VarInt    // Array of registry IDs, present when Type is not 0
 }
 
 func (i IDSet) ToBytes() (ByteArray, error) {
@@ -431,7 +505,7 @@ func (i IDSet) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if i.Type == 0 {
 		// Tag name
 		if i.TagName == nil {
@@ -452,7 +526,7 @@ func (i IDSet) ToBytes() (ByteArray, error) {
 			result = append(result, idBytes...)
 		}
 	}
-	
+
 	return result, nil
 }
 
@@ -461,7 +535,7 @@ func (i *IDSet) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	if i.Type == 0 {
 		// Tag name
 		var tagName Identifier
@@ -477,10 +551,10 @@ func (i *IDSet) FromBytes(data ByteArray) (int, error) {
 		if arraySize < 0 {
 			return 0, errors.New("invalid IDSet type")
 		}
-		
+
 		i.IDs = make([]VarInt, arraySize)
 		offset := bytesRead
-		
+
 		for j := range arraySize {
 			idBytes, err := i.IDs[j].FromBytes(data[offset:])
 			if err != nil {
@@ -488,16 +562,16 @@ func (i *IDSet) FromBytes(data ByteArray) (int, error) {
 			}
 			offset += idBytes
 		}
-		
+
 		return offset, nil
 	}
 }
 
 // SoundEvent - parameters for a sound event
 type SoundEvent struct {
-	SoundName    Identifier
+	SoundName     Identifier
 	HasFixedRange Boolean
-	FixedRange   Optional[Float]
+	FixedRange    Optional[Float]
 }
 
 func (s SoundEvent) ToBytes() (ByteArray, error) {
@@ -505,13 +579,13 @@ func (s SoundEvent) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	fixedRangeBytes, err := s.HasFixedRange.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, fixedRangeBytes...)
-	
+
 	if bool(s.HasFixedRange) {
 		s.FixedRange.Present = true
 		rangeBytes, err := s.FixedRange.ToBytes()
@@ -520,7 +594,7 @@ func (s SoundEvent) ToBytes() (ByteArray, error) {
 		}
 		result = append(result, rangeBytes...)
 	}
-	
+
 	return result, nil
 }
 
@@ -529,13 +603,13 @@ func (s *SoundEvent) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	fixedRangeBytes, err := s.HasFixedRange.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += fixedRangeBytes
-	
+
 	if bool(s.HasFixedRange) {
 		s.FixedRange.Present = true
 		rangeBytes, err := s.FixedRange.FromBytes(data[bytesRead:])
@@ -544,7 +618,7 @@ func (s *SoundEvent) FromBytes(data ByteArray) (int, error) {
 		}
 		bytesRead += rangeBytes
 	}
-	
+
 	return bytesRead, nil
 }
 
@@ -565,13 +639,13 @@ func (c ChatType) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	narrationBytes, err := c.Narration.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, narrationBytes...)
-	
+
 	return result, nil
 }
 
@@ -580,12 +654,12 @@ func (c *ChatType) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	narrationBytes, err := c.Narration.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return bytesRead + narrationBytes, nil
 }
 
@@ -594,19 +668,19 @@ func (c ChatDecoration) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	paramsBytes, err := c.Parameters.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, paramsBytes...)
-	
+
 	styleBytes, err := c.Style.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, styleBytes...)
-	
+
 	return result, nil
 }
 
@@ -615,19 +689,19 @@ func (c *ChatDecoration) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	paramsBytes, err := c.Parameters.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += paramsBytes
-	
+
 	styleBytes, err := c.Style.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += styleBytes
-	
+
 	return bytesRead, nil
 }
 
@@ -659,8 +733,8 @@ func (s *SlotDisplay) FromBytes(data ByteArray) (int, error) {
 
 // ChunkData - chunk data structure
 type ChunkData struct {
-	Heightmaps   PrefixedArray[ByteArray] // Heightmap data
-	Data         PrefixedByteArray       // Chunk section data
+	Heightmaps    PrefixedArray[ByteArray] // Heightmap data
+	Data          PrefixedByteArray        // Chunk section data
 	BlockEntities PrefixedArray[BlockEntity]
 }
 
@@ -676,19 +750,19 @@ func (c ChunkData) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	dataBytes, err := c.Data.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, dataBytes...)
-	
+
 	blockEntityBytes, err := c.BlockEntities.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, blockEntityBytes...)
-	
+
 	return result, nil
 }
 
@@ -697,19 +771,19 @@ func (c *ChunkData) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	dataBytes, err := c.Data.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += dataBytes
-	
+
 	blockEntityBytes, err := c.BlockEntities.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += blockEntityBytes
-	
+
 	return bytesRead, nil
 }
 
@@ -718,25 +792,25 @@ func (b BlockEntity) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	yBytes, err := b.Y.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, yBytes...)
-	
+
 	typeBytes, err := b.Type.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, typeBytes...)
-	
+
 	dataBytes, err := b.Data.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, dataBytes...)
-	
+
 	return result, nil
 }
 
@@ -745,36 +819,36 @@ func (b *BlockEntity) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	yBytes, err := b.Y.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += yBytes
-	
+
 	typeBytes, err := b.Type.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += typeBytes
-	
+
 	dataBytes, err := b.Data.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += dataBytes
-	
+
 	return bytesRead, nil
 }
 
 // LightData - light data structure
 type LightData struct {
-	SkyLightMask       BitSet
-	BlockLightMask     BitSet
-	EmptySkyLightMask  BitSet
+	SkyLightMask        BitSet
+	BlockLightMask      BitSet
+	EmptySkyLightMask   BitSet
 	EmptyBlockLightMask BitSet
-	SkyLightArrays     PrefixedArray[PrefixedByteArray]
-	BlockLightArrays   PrefixedArray[PrefixedByteArray]
+	SkyLightArrays      PrefixedArray[PrefixedByteArray]
+	BlockLightArrays    PrefixedArray[PrefixedByteArray]
 }
 
 func (l LightData) ToBytes() (ByteArray, error) {
@@ -782,37 +856,37 @@ func (l LightData) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	blockMaskBytes, err := l.BlockLightMask.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, blockMaskBytes...)
-	
+
 	emptySkyBytes, err := l.EmptySkyLightMask.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, emptySkyBytes...)
-	
+
 	emptyBlockBytes, err := l.EmptyBlockLightMask.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, emptyBlockBytes...)
-	
+
 	skyArrayBytes, err := l.SkyLightArrays.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, skyArrayBytes...)
-	
+
 	blockArrayBytes, err := l.BlockLightArrays.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 	result = append(result, blockArrayBytes...)
-	
+
 	return result, nil
 }
 
@@ -821,37 +895,37 @@ func (l *LightData) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	blockMaskBytes, err := l.BlockLightMask.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += blockMaskBytes
-	
+
 	emptySkyBytes, err := l.EmptySkyLightMask.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += emptySkyBytes
-	
+
 	emptyBlockBytes, err := l.EmptyBlockLightMask.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += emptyBlockBytes
-	
+
 	skyArrayBytes, err := l.SkyLightArrays.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += skyArrayBytes
-	
+
 	blockArrayBytes, err := l.BlockLightArrays.FromBytes(data[bytesRead:])
 	if err != nil {
 		return 0, err
 	}
 	bytesRead += blockArrayBytes
-	
+
 	return bytesRead, nil
 }
 
@@ -867,7 +941,7 @@ func (o Or[X, Y]) ToBytes() (ByteArray, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if o.IsX {
 		// Use type assertion to check if X implements ToBytes
 		if marshaler, ok := any(o.XVal).(interface{ ToBytes() (ByteArray, error) }); ok {
@@ -891,7 +965,7 @@ func (o Or[X, Y]) ToBytes() (ByteArray, error) {
 			return nil, fmt.Errorf("type %T does not implement ToBytes method", o.YVal)
 		}
 	}
-	
+
 	return result, nil
 }
 
@@ -901,9 +975,9 @@ func (o *Or[X, Y]) FromBytes(data ByteArray) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	o.IsX = bool(isX)
-	
+
 	if o.IsX {
 		// Use type assertion to check if X implements FromBytes
 		if unmarshaler, ok := any(&o.XVal).(interface{ FromBytes(ByteArray) (int, error) }); ok {
