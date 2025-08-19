@@ -12,7 +12,7 @@ import (
 type TestPacketWithLengthTags struct {
 	// Test PrefixedOptional[FixedByteArray] with length tag
 	Signature ns.PrefixedOptional[ns.FixedByteArray] `mc:"length:256"`
-	// Test Optional[FixedByteArray] with length tag  
+	// Test Optional[FixedByteArray] with length tag
 	OptionalSignature ns.Optional[ns.FixedByteArray] `mc:"length:32"`
 	// Test different length
 	ShortSignature ns.PrefixedOptional[ns.FixedByteArray] `mc:"length:16"`
@@ -335,21 +335,21 @@ func TestMultipleFieldsWithDifferentLengths(t *testing.T) {
 
 	testData := make(ns.ByteArray, 3+8+16+4) // 3 presence bytes + data
 	offset := 0
-	
+
 	testData[offset] = 1
 	offset++
 	for i := range 8 {
 		testData[offset+i] = byte(0x10 + i)
 	}
 	offset += 8
-	
+
 	testData[offset] = 1
 	offset++
 	for i := range 16 {
 		testData[offset+i] = byte(0x20 + i)
 	}
 	offset += 16
-	
+
 	testData[offset] = 1
 	offset++
 	for i := range 4 {
