@@ -201,3 +201,48 @@ func (n NBT) ParseAsTextComponent() (*ChatTextComponent, error) {
 	}
 	return &component, nil
 }
+
+// ToMap converts the NBT data to a map[string]any structure
+func (n NBT) ToMap() (map[string]any, error) {
+	if n.Data == nil {
+		return nil, fmt.Errorf("NBT data is nil")
+	}
+
+	switch data := n.Data.(type) {
+	case map[string]any:
+		return data, nil
+	default:
+		jsonBytes, err := json.Marshal(n.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert NBT to JSON: %w", err)
+		}
+		
+		var result map[string]any
+		err = json.Unmarshal(jsonBytes, &result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal JSON to map: %w", err)
+		}
+		
+		return result, nil
+	}
+}
+
+// FromMap sets the NBT data from a map[string]any structure
+func (n *NBT) FromMap(data map[string]any) error {
+	if data == nil {
+		n.Data = nil
+		return nil
+	}
+	
+	n.Data = data
+	return nil
+}
+
+// ToMapSafe converts NBT data to a map, returning an empty map if conversion fails
+func (n NBT) ToMapSafe() map[string]any {
+	result, err := n.ToMap()
+	if err != nil {
+		return make(map[string]any)
+	}
+	return result
+}

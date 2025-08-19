@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -175,6 +174,67 @@ func (t TextComponent) String() string {
 	return "<empty text component>"
 }
 
+// ToMap converts the TextComponent's NBT data to a map[string]any structure
+func (t TextComponent) ToMap() (map[string]any, error) {
+	if t.parsedNBT == nil {
+		return nil, fmt.Errorf("no parsed NBT data available")
+	}
+	return t.parsedNBT.ToMap()
+}
+
+// FromMap sets the TextComponent from a map[string]any structure
+func (t *TextComponent) FromMap(data map[string]any) error {
+	if data == nil {
+		t.Data = ByteArray{0x00}
+		t.parsedNBT = nil
+		t.text = ""
+		return nil
+	}
+	
+	// Create NBT from map
+	nbt := NBT{}
+	err := nbt.FromMap(data)
+	if err != nil {
+		return fmt.Errorf("failed to create NBT from map: %w", err)
+	}
+	
+	// Convert NBT to bytes
+	nbtBytes, err := nbt.ToBytes()
+	if err != nil {
+		return fmt.Errorf("failed to encode NBT: %w", err)
+	}
+	
+	// Set the data and parse it
+	t.Data = nbtBytes
+	t.parsedNBT = &nbt
+	t.text = nbt.ExtractTextFromNBT()
+	
+	return nil
+}
+
+// ToMapSafe converts the TextComponent to a map, returning an empty map if conversion fails
+func (t TextComponent) ToMapSafe() map[string]any {
+	result, err := t.ToMap()
+	if err != nil {
+		return make(map[string]any)
+	}
+	return result
+}
+
+// NewTextComponentFromMap creates a new TextComponent from a map
+func NewTextComponentFromMap(data map[string]any) (TextComponent, error) {
+	var tc TextComponent
+	err := tc.FromMap(data)
+	return tc, err
+}
+
+// NewTextComponentFromString creates a TextComponent from a simple text string
+func NewTextComponentFromString(text string) TextComponent {
+	data := map[string]any{"text": text}
+	tc, _ := NewTextComponentFromMap(data)
+	return tc
+}
+
 // Entity Metadata - miscellaneous information about an entity
 //
 // https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Entity_Metadata
@@ -220,7 +280,37 @@ func (h *HashedSlot) FromBytes(data ByteArray) (int, error) {
 	return h.Data.FromBytes(data)
 }
 
-// Optional - wrapper for optional fields
+// FixedByteArray represents a ByteArray with a fixed length
+type FixedByteArray struct {
+	Data   ByteArray
+	Length int // Expected fixed length
+}
+
+func NewFixedByteArray(length int) FixedByteArray {
+	return FixedByteArray{
+		Data:   make(ByteArray, length),
+		Length: length,
+	}
+}
+
+func (f FixedByteArray) ToBytes() (ByteArray, error) {
+	if len(f.Data) != f.Length {
+		return nil, fmt.Errorf("FixedByteArray length mismatch: expected %d, got %d", f.Length, len(f.Data))
+	}
+	return f.Data, nil
+}
+
+func (f *FixedByteArray) FromBytes(data ByteArray) (int, error) {
+	if len(data) < f.Length {
+		return 0, fmt.Errorf("insufficient data for FixedByteArray: need %d bytes, have %d", f.Length, len(data))
+	}
+	f.Data = make(ByteArray, f.Length)
+	copy(f.Data, data[:f.Length])
+	return f.Length, nil
+}
+
+// Optional - wrapper for optional fields without a boolean prefix
+// Presence must be known from context
 type Optional[T any] struct {
 	Present bool
 	Value   T
@@ -231,22 +321,51 @@ func (o Optional[T]) ToBytes() (ByteArray, error) {
 		return ByteArray{}, nil
 	}
 
-	// Use type assertion to check if T implements ToBytes
+	// Direct handling for ByteArray - just pass through
+	if ba, ok := any(o.Value).(ByteArray); ok {
+		return ba, nil
+	}
+
+	// Handle FixedByteArray
+	if fba, ok := any(o.Value).(FixedByteArray); ok {
+		return fba.ToBytes()
+	}
+
+	// Use marshaler interface
 	if marshaler, ok := any(o.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
 		return marshaler.ToBytes()
 	}
+
 	return nil, fmt.Errorf("type %T does not implement ToBytes method", o.Value)
 }
 
 func (o *Optional[T]) FromBytes(data ByteArray) (int, error) {
-	// For Optional, presence must be known from context
-	// This implementation assumes the field is present if called
-	o.Present = true
+	// For Optional without prefix, presence must be set externally
+	if !o.Present {
+		return 0, nil
+	}
 
-	// Use type assertion to check if T implements FromBytes
+	// Handle FixedByteArray
+	if fba, ok := any(&o.Value).(*FixedByteArray); ok && fba != nil {
+		return fba.FromBytes(data)
+	}
+
+	// Direct handling for ByteArray - consume all remaining data
+	// (unless it's a known fixed size, which should use FixedByteArray)
+	if _, isBA := any(o.Value).(ByteArray); isBA {
+		ba := make(ByteArray, len(data))
+		copy(ba, data)
+		if v, ok := any(ba).(T); ok {
+			o.Value = v
+		}
+		return len(data), nil
+	}
+
+	// Use unmarshaler interface
 	if unmarshaler, ok := any(&o.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 		return unmarshaler.FromBytes(data)
 	}
+
 	return 0, fmt.Errorf("type %T does not implement FromBytes method", o.Value)
 }
 
@@ -266,8 +385,15 @@ func (p PrefixedOptional[T]) ToBytes() (ByteArray, error) {
 		return result, nil
 	}
 
-	if marshaler, ok := any(p.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
-		valueBytes, err := marshaler.ToBytes()
+	// Direct handling for ByteArray
+	if ba, ok := any(p.Value).(ByteArray); ok {
+		result = append(result, ba...)
+		return result, nil
+	}
+
+	// Handle FixedByteArray
+	if fba, ok := any(p.Value).(FixedByteArray); ok {
+		valueBytes, err := fba.ToBytes()
 		if err != nil {
 			return nil, err
 		}
@@ -275,20 +401,13 @@ func (p PrefixedOptional[T]) ToBytes() (ByteArray, error) {
 		return result, nil
 	}
 
-	val := reflect.ValueOf(p.Value)
-	if val.Kind() == reflect.Array {
-		for i := range val.Len() {
-			elem := val.Index(i).Interface()
-			if marshaler, ok := elem.(interface{ ToBytes() (ByteArray, error) }); ok {
-				elemBytes, err := marshaler.ToBytes()
-				if err != nil {
-					return nil, fmt.Errorf("error marshaling array element %d: %w", i, err)
-				}
-				result = append(result, elemBytes...)
-			} else {
-				return nil, fmt.Errorf("array element type %T does not implement ToBytes method", elem)
-			}
+	// Use marshaler interface
+	if marshaler, ok := any(p.Value).(interface{ ToBytes() (ByteArray, error) }); ok {
+		valueBytes, err := marshaler.ToBytes()
+		if err != nil {
+			return nil, err
 		}
+		result = append(result, valueBytes...)
 		return result, nil
 	}
 
@@ -307,6 +426,22 @@ func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
 		return bytesRead, nil
 	}
 
+	// Handle FixedByteArray
+	if fba, ok := any(&p.Value).(*FixedByteArray); ok && fba != nil {
+		valueBytes, err := fba.FromBytes(data[bytesRead:])
+		if err != nil {
+			return 0, err
+		}
+		return bytesRead + valueBytes, nil
+	}
+
+	// For regular ByteArray without known length, this is problematic
+	// The caller should use FixedByteArray for known sizes
+	if _, isBA := any(p.Value).(ByteArray); isBA {
+		return 0, errors.New("PrefixedOptional[ByteArray] requires FixedByteArray for known sizes")
+	}
+
+	// Use unmarshaler interface
 	if unmarshaler, ok := any(&p.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 		valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
 		if err != nil {
@@ -315,38 +450,17 @@ func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
 		return bytesRead + valueBytes, nil
 	}
 
-	val := reflect.ValueOf(&p.Value).Elem()
-	if val.Kind() == reflect.Array {
-		totalRead := bytesRead
-		for i := 0; i < val.Len(); i++ {
-			elem := val.Index(i)
-			if elem.CanAddr() {
-				elemPtr := elem.Addr().Interface()
-				if unmarshaler, ok := elemPtr.(interface{ FromBytes(ByteArray) (int, error) }); ok {
-					read, err := unmarshaler.FromBytes(data[totalRead:])
-					if err != nil {
-						return 0, fmt.Errorf("error unmarshaling array element %d: %w", i, err)
-					}
-					totalRead += read
-				} else {
-					return 0, fmt.Errorf("array element type %T does not implement FromBytes method", elem.Interface())
-				}
-			} else {
-				return 0, fmt.Errorf("cannot take address of array element %d", i)
-			}
-		}
-		return totalRead, nil
-	}
-
 	return 0, fmt.Errorf("type %T does not implement FromBytes method", p.Value)
 }
 
-// Array - fixed-size array wrapper
+// Array - fixed-size array wrapper (no length prefix)
+// For use when the array size is known from context
 type Array[T any] []T
 
 func (a Array[T]) ToBytes() (ByteArray, error) {
 	var result ByteArray
 
+	// Optimize for byte arrays - make them behave like ByteArray
 	if _, isByte := any(a).(Array[Byte]); isByte {
 		bytes := make([]byte, len(a))
 		for i := range a {
@@ -357,6 +471,7 @@ func (a Array[T]) ToBytes() (ByteArray, error) {
 		return ByteArray(bytes), nil
 	}
 
+	// General case for other types
 	for i, item := range a {
 		if marshaler, ok := any(item).(interface{ ToBytes() (ByteArray, error) }); ok {
 			itemBytes, err := marshaler.ToBytes()
@@ -371,28 +486,70 @@ func (a Array[T]) ToBytes() (ByteArray, error) {
 	return result, nil
 }
 
-func (a *Array[T]) FromBytes(data ByteArray, length int) (int, error) {
+// FromBytesWithLength reads a fixed-size array with known length
+func (a *Array[T]) FromBytesWithLength(data ByteArray, length int) (int, error) {
 	*a = make(Array[T], length)
-	for i := range length {
-		if b, ok := any(Byte(data[i])).(T); ok {
-			(*a)[i] = b
+	
+	// Optimize for byte arrays
+	if _, isByte := any(*a).(Array[Byte]); isByte {
+		if len(data) < length {
+			return 0, errors.New("insufficient data for byte array")
+		}
+		for i := 0; i < length; i++ {
+			if b, ok := any(Byte(data[i])).(T); ok {
+				(*a)[i] = b
+			}
+		}
+		return length, nil
+	}
+
+	// General case for other types
+	offset := 0
+	for i := 0; i < length; i++ {
+		if unmarshaler, ok := any(&(*a)[i]).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			itemBytes, err := unmarshaler.FromBytes(data[offset:])
+			if err != nil {
+				return 0, fmt.Errorf("error unmarshaling array item %d: %w", i, err)
+			}
+			offset += itemBytes
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", (*a)[i])
 		}
 	}
-	return length, nil
+	return offset, nil
+}
+
+// FromBytes consumes all available data
+// Use FromBytesWithLength when you know the array size
+func (a *Array[T]) FromBytes(data ByteArray) (int, error) {
+	// Special case for byte arrays - consume all
+	if _, isByte := any(*a).(Array[Byte]); isByte {
+		*a = make(Array[T], len(data))
+		for i := 0; i < len(data); i++ {
+			if b, ok := any(Byte(data[i])).(T); ok {
+				(*a)[i] = b
+			}
+		}
+		return len(data), nil
+	}
+
+	// For other types, we can't know the length without context
+	return 0, errors.New("Array.FromBytes requires length context for non-byte types, use FromBytesWithLength")
 }
 
 // PrefixedArray - length-prefixed array
+// Behaves like PrefixedByteArray when T is Byte
 type PrefixedArray[T any] []T
 
 func (p PrefixedArray[T]) ToBytes() (ByteArray, error) {
-	// Automatically determine length from the data
+	// Encode length prefix
 	length := VarInt(len(p))
 	result, err := length.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 
-	// Special handling for byte arrays
+	// Optimize for byte arrays - make PrefixedArray[Byte] behave like PrefixedByteArray
 	if _, isByte := any(p).(PrefixedArray[Byte]); isByte {
 		bytes := make([]byte, len(p))
 		for i := range p {
@@ -404,8 +561,8 @@ func (p PrefixedArray[T]) ToBytes() (ByteArray, error) {
 		return result, nil
 	}
 
+	// General case for other types
 	for i, item := range p {
-		// Use type assertion to check if T implements ToBytes
 		if marshaler, ok := any(item).(interface{ ToBytes() (ByteArray, error) }); ok {
 			itemBytes, err := marshaler.ToBytes()
 			if err != nil {
@@ -430,7 +587,7 @@ func (p *PrefixedArray[T]) FromBytes(data ByteArray) (int, error) {
 		return 0, errors.New("negative array length")
 	}
 
-	// Special handling for byte arrays
+	// Optimize for byte arrays - make PrefixedArray[Byte] behave like PrefixedByteArray
 	if _, isByte := any(*p).(PrefixedArray[Byte]); isByte {
 		if len(data) < bytesRead+int(length) {
 			return 0, errors.New("insufficient data for byte array")
@@ -444,11 +601,11 @@ func (p *PrefixedArray[T]) FromBytes(data ByteArray) (int, error) {
 		return bytesRead + int(length), nil
 	}
 
+	// General case for other types
 	*p = make(PrefixedArray[T], length)
 	offset := bytesRead
 
 	for i := 0; i < int(length); i++ {
-		// Use type assertion to check if T implements FromBytes
 		if unmarshaler, ok := any(&(*p)[i]).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 			itemBytes, err := unmarshaler.FromBytes(data[offset:])
 			if err != nil {
@@ -775,7 +932,7 @@ func (s *SlotDisplay) FromBytes(data ByteArray) (int, error) {
 // ChunkData - chunk data structure
 type ChunkData struct {
 	Heightmaps    PrefixedArray[ByteArray] // Heightmap data
-	Data          PrefixedByteArray        // Chunk section data
+	Data          PrefixedArray[Byte]      // Chunk section data
 	BlockEntities PrefixedArray[BlockEntity]
 }
 
@@ -888,8 +1045,8 @@ type LightData struct {
 	BlockLightMask      BitSet
 	EmptySkyLightMask   BitSet
 	EmptyBlockLightMask BitSet
-	SkyLightArrays      PrefixedArray[PrefixedByteArray]
-	BlockLightArrays    PrefixedArray[PrefixedByteArray]
+	SkyLightArrays      PrefixedArray[PrefixedArray[Byte]]
+	BlockLightArrays    PrefixedArray[PrefixedArray[Byte]]
 }
 
 func (l LightData) ToBytes() (ByteArray, error) {

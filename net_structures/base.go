@@ -6,8 +6,6 @@
 // (Ref.: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Data_types)
 package net_structures
 
-import "errors"
-
 // This is just a sequence of zero or more bytes. It represents any data sent over the wire.
 // The length is known from the context.
 //
@@ -34,36 +32,4 @@ func (b *ByteArray) FromBytes(data ByteArray) (int, error) {
 	copy(dst, data)
 	*b = dst
 	return len(data), nil
-}
-
-// PrefixedByteArray is a byte array prefixed with a VarInt length.
-//
-// Many packet fields use a VarInt length prefix, followed by that many bytes.
-// Use this type for those fields.
-type PrefixedByteArray []byte
-
-func (p PrefixedByteArray) ToBytes() (ByteArray, error) {
-	lengthBytes, err := VarInt(len(p)).ToBytes()
-	if err != nil {
-		return nil, err
-	}
-	out := make(ByteArray, 0, len(lengthBytes)+len(p))
-	out = append(out, lengthBytes...)
-	out = append(out, []byte(p)...)
-	return out, nil
-}
-
-func (p *PrefixedByteArray) FromBytes(data ByteArray) (int, error) {
-	var length VarInt
-	off, err := length.FromBytes(data)
-	if err != nil {
-		return 0, err
-	}
-	if int(length) < 0 || len(data) < off+int(length) {
-		return 0, errors.New("insufficient data for PrefixedByteArray")
-	}
-	dst := make([]byte, int(length))
-	copy(dst, data[off:off+int(length)])
-	*p = PrefixedByteArray(dst)
-	return off + int(length), nil
 }

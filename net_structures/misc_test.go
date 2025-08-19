@@ -425,3 +425,217 @@ func TestEntityMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestFixedByteArray(t *testing.T) {
+	fba := ns.NewFixedByteArray(256)
+	for i := range fba.Data {
+		fba.Data[i] = byte(i % 256)
+	}
+	
+	encoded, err := fba.ToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode FixedByteArray: %v", err)
+	}
+	
+	if len(encoded) != 256 {
+		t.Errorf("Encoded length mismatch: got %d, want 256", len(encoded))
+	}
+	
+	var decoded ns.FixedByteArray
+	decoded.Length = 256
+	bytesRead, err := decoded.FromBytes(encoded)
+	if err != nil {
+		t.Fatalf("Failed to decode FixedByteArray: %v", err)
+	}
+	
+	if bytesRead != 256 {
+		t.Errorf("Bytes read mismatch: got %d, want 256", bytesRead)
+	}
+	
+	for i, b := range decoded.Data {
+		if b != fba.Data[i] {
+			t.Errorf("Decoded data mismatch at %d: got %02x, want %02x", i, b, fba.Data[i])
+			break
+		}
+	}
+}
+
+// Test Optional and PrefixedOptional with FixedByteArray
+func TestOptionalFixedByteArray(t *testing.T) {
+	po := ns.PrefixedOptional[ns.FixedByteArray]{
+		Present: true,
+		Value:   ns.NewFixedByteArray(256),
+	}
+	
+	for i := range po.Value.Data {
+		po.Value.Data[i] = byte(i % 256)
+	}
+	
+	encoded, err := po.ToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode PrefixedOptional[FixedByteArray]: %v", err)
+	}
+	
+	if len(encoded) != 257 {
+		t.Errorf("Encoded length mismatch: got %d, want 257", len(encoded))
+	}
+	
+	var decoded ns.PrefixedOptional[ns.FixedByteArray]
+	decoded.Value = ns.NewFixedByteArray(256)
+	bytesRead, err := decoded.FromBytes(encoded)
+	if err != nil {
+		t.Fatalf("Failed to decode PrefixedOptional[FixedByteArray]: %v", err)
+	}
+	
+	if bytesRead != 257 {
+		t.Errorf("Bytes read mismatch: got %d, want 257", bytesRead)
+	}
+	
+	if !decoded.Present {
+		t.Errorf("Expected Present to be true")
+	}
+	
+	for i, b := range decoded.Value.Data {
+		if b != po.Value.Data[i] {
+			t.Errorf("Decoded data mismatch at %d: got %02x, want %02x", i, b, po.Value.Data[i])
+			break
+		}
+	}
+	
+	po2 := ns.PrefixedOptional[ns.FixedByteArray]{
+		Present: false,
+	}
+	
+	encoded2, err := po2.ToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode PrefixedOptional with Present=false: %v", err)
+	}
+	
+	if len(encoded2) != 1 {
+		t.Errorf("Encoded length mismatch for absent optional: got %d, want 1", len(encoded2))
+	}
+}
+
+// Test PrefixedArray[Byte] behaves like PrefixedByteArray
+func TestPrefixedArrayByte(t *testing.T) {
+	original := []byte("Hello, World!")
+	
+	pa := make(ns.PrefixedArray[ns.Byte], len(original))
+	for i, b := range original {
+		pa[i] = ns.Byte(b)
+	}
+	
+	encoded, err := pa.ToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode PrefixedArray[Byte]: %v", err)
+	}
+	
+	var decoded ns.PrefixedArray[ns.Byte]
+	bytesRead, err := decoded.FromBytes(encoded)
+	if err != nil {
+		t.Fatalf("Failed to decode PrefixedArray[Byte]: %v", err)
+	}
+	
+	if bytesRead != len(encoded) {
+		t.Errorf("Bytes read mismatch: got %d, want %d", bytesRead, len(encoded))
+	}
+	
+	result := make([]byte, len(decoded))
+	for i, b := range decoded {
+		result[i] = byte(b)
+	}
+	
+	for i, b := range result {
+		if b != original[i] {
+			t.Errorf("Decoded data mismatch at %d: got %02x, want %02x", i, b, original[i])
+			break
+		}
+	}
+}
+
+// Test NBT ToMap/FromMap functionality
+func TestNBTMapMethods(t *testing.T) {
+	testData := map[string]any{
+		"text":  "Hello World",
+		"color": "red",
+		"extra": []any{
+			map[string]any{"text": " with extra", "color": "blue"},
+		},
+	}
+	
+	var nbt ns.NBT
+	err := nbt.FromMap(testData)
+	if err != nil {
+		t.Fatalf("Failed to create NBT from map: %v", err)
+	}
+	
+	resultMap, err := nbt.ToMap()
+	if err != nil {
+		t.Fatalf("Failed to convert NBT to map: %v", err)
+	}
+	
+	if resultMap["text"] != "Hello World" {
+		t.Errorf("Expected text 'Hello World', got %v", resultMap["text"])
+	}
+	if resultMap["color"] != "red" {
+		t.Errorf("Expected color 'red', got %v", resultMap["color"])
+	}
+	
+	t.Logf("NBT ToMap/FromMap test passed: %+v", resultMap)
+}
+
+// Test TextComponent ToMap/FromMap functionality
+func TestTextComponentMapMethods(t *testing.T) {
+	testData := map[string]any{
+		"text":  "Hello World",
+		"color": "green",
+		"bold":  true,
+	}
+	
+	tc, err := ns.NewTextComponentFromMap(testData)
+	if err != nil {
+		t.Fatalf("Failed to create TextComponent from map: %v", err)
+	}
+	
+	extractedText := tc.GetText()
+	if extractedText != "Hello World" {
+		t.Errorf("Expected text 'Hello World', got '%s'", extractedText)
+	}
+	
+	resultMap := tc.ToMapSafe()
+	if resultMap["text"] != "Hello World" {
+		t.Errorf("Expected text 'Hello World' in map, got %v", resultMap["text"])
+	}
+	
+	encoded, err := tc.ToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode TextComponent: %v", err)
+	}
+	
+	var decoded ns.TextComponent
+	_, err = decoded.FromBytes(encoded)
+	if err != nil {
+		t.Fatalf("Failed to decode TextComponent: %v", err)
+	}
+	
+	if decoded.GetText() != "Hello World" {
+		t.Errorf("Round-trip failed: expected 'Hello World', got '%s'", decoded.GetText())
+	}
+	
+	t.Logf("TextComponent round-trip test passed")
+}
+
+// Test creating TextComponent from simple string
+func TestTextComponentFromString(t *testing.T) {
+	tc := ns.NewTextComponentFromString("Simple text")
+	
+	text := tc.GetText()
+	if text != "Simple text" {
+		t.Errorf("Expected 'Simple text', got '%s'", text)
+	}
+	
+	textMap := tc.ToMapSafe()
+	if textMap["text"] != "Simple text" {
+		t.Errorf("Expected map to have text='Simple text', got %v", textMap)
+	}
+}
