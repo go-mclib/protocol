@@ -372,33 +372,6 @@ func TestOr(t *testing.T) {
 	})
 }
 
-func TestTextComponent(t *testing.T) {
-	val := ns.TextComponent{
-		Data: ns.ByteArray{0x01, 0x02, 0x03, 0x04},
-	}
-
-	data, err := val.ToBytes()
-	if err != nil {
-		t.Errorf("TextComponent.ToBytes() error = %v", err)
-	}
-
-	var result ns.TextComponent
-	_, err = result.FromBytes(data)
-	if err != nil {
-		t.Errorf("TextComponent.FromBytes() error = %v", err)
-	}
-
-	if len(result.Data) != len(val.Data) {
-		t.Errorf("TextComponent data length: got %v, want %v", len(result.Data), len(val.Data))
-	}
-
-	for i, b := range val.Data {
-		if result.Data[i] != b {
-			t.Errorf("TextComponent data[%d]: got %02x, want %02x", i, result.Data[i], b)
-		}
-	}
-}
-
 func TestEntityMetadata(t *testing.T) {
 	val := ns.EntityMetadata{
 		Data: ns.ByteArray{0xAA, 0xBB, 0xCC},

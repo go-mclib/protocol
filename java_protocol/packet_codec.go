@@ -3,9 +3,30 @@ package java_protocol
 import (
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 
 	ns "github.com/go-mclib/protocol/net_structures"
 )
+
+// parseLengthFromTag extracts length value from mc tag (e.g., "length:256" returns 256)
+func parseLengthFromTag(tag string) int {
+	if tag == "" {
+		return 0
+	}
+
+	parts := strings.SplitSeq(tag, ",")
+	for part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "length:") {
+			lengthStr := strings.TrimPrefix(part, "length:")
+			if length, err := strconv.Atoi(lengthStr); err == nil {
+				return length
+			}
+		}
+	}
+	return 0
+}
 
 // PacketDataToBytes converts a struct to bytes using reflection
 func PacketDataToBytes(v any) (ns.ByteArray, error) {
@@ -158,15 +179,42 @@ func unmarshalStruct(val reflect.Value, data ns.ByteArray) (int, error) {
 			continue // skip
 		}
 
-		// is there data left?
 		if offset >= len(data) {
-			return offset, fmt.Errorf("insufficient data for field %s", fieldType.Name)
+			fieldTypeName := field.Type().String()
+			if strings.Contains(fieldTypeName, "PrefixedOptional") {
+				presentField := field.FieldByName("Present")
+				if presentField.IsValid() && presentField.CanSet() {
+					presentField.SetBool(false)
+					continue // Skip to next field
+				}
+			}
+			return offset, fmt.Errorf("insufficient data for field %s (have %d bytes left, at offset %d of %d total)", fieldType.Name, len(data)-offset, offset, len(data))
 		}
 
-		// unmarshal
-		bytesConsumed, err := unmarshalField(field, data[offset:])
+		if i > 0 {
+			prevField := val.Field(i - 1)
+			prevFieldType := typ.Field(i - 1)
+			if prevFieldType.Name == "MessageID" && strings.Contains(field.Type().String(), "Optional") && strings.Contains(field.Type().String(), "FixedByteArray") {
+				var prevIsZero bool
+				switch prevField.Kind() {
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					prevIsZero = prevField.Int() == 0
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					prevIsZero = prevField.Uint() == 0
+				default:
+					if vi, ok := prevField.Interface().(ns.VarInt); ok {
+						prevIsZero = int(vi) == 0
+					}
+				}
+				if presentField := field.FieldByName("Present"); presentField.IsValid() && presentField.CanSet() {
+					presentField.SetBool(prevIsZero)
+				}
+			}
+		}
+
+		bytesConsumed, err := UnmarshalFieldWithTag(field, data[offset:], tag)
 		if err != nil {
-			return offset, fmt.Errorf("error unmarshaling field %s: %w", fieldType.Name, err)
+			return offset, fmt.Errorf("error unmarshaling field %s (at offset %d, %d bytes remaining): %w", fieldType.Name, offset, len(data)-offset, err)
 		}
 
 		offset += bytesConsumed
@@ -175,7 +223,94 @@ func unmarshalStruct(val reflect.Value, data ns.ByteArray) (int, error) {
 	return offset, nil
 }
 
-func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
+// unmarshalSliceWithReflection handles slice types (including PrefixedArray) using reflection
+// when their FromBytes method fails due to struct elements not implementing FromBytes
+func unmarshalSliceWithReflection(field reflect.Value, data ns.ByteArray) (int, error) {
+	var length ns.VarInt
+	bytesRead, err := length.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+
+	if length < 0 {
+		return 0, fmt.Errorf("negative array length")
+	}
+
+	slice := reflect.MakeSlice(field.Type(), int(length), int(length))
+	offset := bytesRead
+
+	for i := 0; i < int(length); i++ {
+		elem := slice.Index(i)
+		itemBytes, err := UnmarshalField(elem, data[offset:])
+		if err != nil {
+			return 0, fmt.Errorf("error unmarshaling array item %d: %w", i, err)
+		}
+		offset += itemBytes
+	}
+
+	field.Set(slice)
+	return offset, nil
+}
+
+// unmarshalPrefixedOptionalFixedByteArray handles PrefixedOptional[FixedByteArray] with length from tag
+func unmarshalPrefixedOptionalFixedByteArray(field reflect.Value, data ns.ByteArray, length int) (int, error) {
+	var present ns.Boolean
+	bytesRead, err := present.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+
+	presentField := field.FieldByName("Present")
+	if presentField.IsValid() {
+		presentField.SetBool(bool(present))
+	}
+
+	if !bool(present) {
+		return bytesRead, nil
+	}
+
+	valueField := field.FieldByName("Value")
+	if valueField.IsValid() && valueField.CanSet() {
+		fba := ns.FixedByteArray{Length: length}
+		valueBytes, err := fba.FromBytes(data[bytesRead:])
+		if err != nil {
+			return 0, err
+		}
+		valueField.Set(reflect.ValueOf(fba))
+		return bytesRead + valueBytes, nil
+	}
+
+	return 0, fmt.Errorf("could not find or set Value field in PrefixedOptional")
+}
+
+// unmarshalOptionalFixedByteArray handles Optional[FixedByteArray] with length from tag
+func unmarshalOptionalFixedByteArray(field reflect.Value, data ns.ByteArray, length int) (int, error) {
+	presentField := field.FieldByName("Present")
+	if !presentField.IsValid() || !presentField.Bool() {
+		return 0, nil
+	}
+
+	valueField := field.FieldByName("Value")
+	if valueField.IsValid() && valueField.CanSet() {
+		fba := ns.FixedByteArray{Length: length}
+		valueBytes, err := fba.FromBytes(data)
+		if err != nil {
+			return 0, err
+		}
+		valueField.Set(reflect.ValueOf(fba))
+		return valueBytes, nil
+	}
+
+	return 0, fmt.Errorf("could not find or set Value field in Optional")
+}
+
+// UnmarshalField unmarshals a field without tag information (for backwards compatibility)
+func UnmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
+	return UnmarshalFieldWithTag(field, data, "")
+}
+
+// UnmarshalFieldWithTag unmarshals a field with optional struct tag information
+func UnmarshalFieldWithTag(field reflect.Value, data ns.ByteArray, tag string) (int, error) {
 	// handle pointer fields
 	if field.Kind() == reflect.Ptr {
 		if field.IsNil() {
@@ -184,13 +319,37 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 		field = field.Elem()
 	}
 
+	length := parseLengthFromTag(tag)
+	if length > 0 {
+		if strings.Contains(field.Type().String(), "PrefixedOptional") &&
+			strings.Contains(field.Type().String(), "FixedByteArray") {
+			return unmarshalPrefixedOptionalFixedByteArray(field, data, length)
+		}
+
+		if strings.Contains(field.Type().String(), "Optional") &&
+			strings.Contains(field.Type().String(), "FixedByteArray") {
+			return unmarshalOptionalFixedByteArray(field, data, length)
+		}
+	}
+
 	// has FromBytes method?
 	if field.CanAddr() {
 		if method := field.Addr().MethodByName("FromBytes"); method.IsValid() {
 			results := method.Call([]reflect.Value{reflect.ValueOf(data)})
 			if len(results) == 2 {
 				if !results[1].IsNil() {
-					return 0, results[1].Interface().(error)
+					err := results[1].Interface().(error)
+					if strings.Contains(err.Error(), "does not implement FromBytes method") && field.Kind() == reflect.Slice {
+						return unmarshalSliceWithReflection(field, data)
+					}
+					typeName := field.Type().String()
+					if strings.Contains(typeName, "Optional[") && !strings.Contains(typeName, "PrefixedOptional") {
+						if presentField := field.FieldByName("Present"); presentField.IsValid() && presentField.CanSet() {
+							presentField.SetBool(false)
+							return 0, nil
+						}
+					}
+					return 0, err
 				}
 				return results[0].Interface().(int), nil
 			}
@@ -202,7 +361,15 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 		results := method.Call([]reflect.Value{reflect.ValueOf(data)})
 		if len(results) == 2 {
 			if !results[1].IsNil() {
-				return 0, results[1].Interface().(error)
+				err := results[1].Interface().(error)
+				if strings.Contains(err.Error(), "does not implement FromBytes method") && field.Kind() == reflect.Slice {
+					return unmarshalSliceWithReflection(field, data)
+				}
+				typeName := field.Type().String()
+				if strings.Contains(typeName, "Optional[") && !strings.Contains(typeName, "PrefixedOptional") {
+					return 0, nil
+				}
+				return 0, err
 			}
 			return results[0].Interface().(int), nil
 		}
@@ -211,11 +378,9 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 	// handle other types
 	switch field.Kind() {
 	case reflect.Struct:
-		// recursively unmarshal nested structs
 		return unmarshalStruct(field, data)
 
 	case reflect.Slice:
-		// decode length first
 		var length ns.VarInt
 		n, err := length.FromBytes(data)
 		if err != nil {
@@ -223,10 +388,9 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 		}
 		offset := n
 
-		// create slice
 		slice := reflect.MakeSlice(field.Type(), int(length), int(length))
 		for j := range int(length) {
-			bytesConsumed, err := unmarshalField(slice.Index(j), data[offset:])
+			bytesConsumed, err := UnmarshalField(slice.Index(j), data[offset:])
 			if err != nil {
 				return offset, err
 			}
@@ -236,10 +400,9 @@ func unmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 		return offset, nil
 
 	case reflect.Array:
-		// fixed-size arrays
 		offset := 0
 		for j := range field.Len() {
-			bytesConsumed, err := unmarshalField(field.Index(j), data[offset:])
+			bytesConsumed, err := UnmarshalField(field.Index(j), data[offset:])
 			if err != nil {
 				return offset, err
 			}

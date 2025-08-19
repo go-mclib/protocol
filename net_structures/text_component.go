@@ -42,7 +42,18 @@ func (c ChatTextComponent) String() string {
 	if c.Raw != nil {
 		if translate, ok := c.Raw["translate"].(string); ok {
 			if with, ok := c.Raw["with"].([]any); ok {
-				return fmt.Sprintf("%s [%v]", translate, with)
+				var parts []string
+				for _, arg := range with {
+					switch v := arg.(type) {
+					case map[string]any:
+						parts = append(parts, extractTextFromMap(v))
+					case string:
+						parts = append(parts, v)
+					default:
+						parts = append(parts, fmt.Sprintf("%v", v))
+					}
+				}
+				return fmt.Sprintf("%s [%s]", translate, strings.Join(parts, ", "))
 			}
 			return translate
 		}

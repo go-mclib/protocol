@@ -59,14 +59,25 @@ func (n *NBT) FromBytes(data ByteArray) (int, error) {
 
 	var nbtData any
 	_, err := decoder.Decode(&nbtData)
-	if err != nil {
-		return 0, fmt.Errorf("failed to decode NBT data: %w", err)
+	if err == nil {
+		n.Data = nbtData
+		bytesRead := len(data) - reader.Len()
+		return bytesRead, nil
 	}
 
-	n.Data = nbtData
+	var str String
+	if strBytes, jerr := str.FromBytes(data); jerr == nil && strBytes > 0 {
+		var obj any
+		if json.Unmarshal([]byte(str), &obj) == nil {
+			n.Data = obj
+			return strBytes, nil
+		}
 
-	bytesRead := len(data) - reader.Len()
-	return bytesRead, nil
+		n.Data = string(str)
+		return strBytes, nil
+	}
+
+	return 0, fmt.Errorf("failed to decode NBT data: %w", err)
 }
 
 // DecodeTo decodes the NBT data into the provided destination
@@ -216,13 +227,13 @@ func (n NBT) ToMap() (map[string]any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert NBT to JSON: %w", err)
 		}
-		
+
 		var result map[string]any
 		err = json.Unmarshal(jsonBytes, &result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal JSON to map: %w", err)
 		}
-		
+
 		return result, nil
 	}
 }
@@ -233,7 +244,7 @@ func (n *NBT) FromMap(data map[string]any) error {
 		n.Data = nil
 		return nil
 	}
-	
+
 	n.Data = data
 	return nil
 }

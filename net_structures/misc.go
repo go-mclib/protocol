@@ -137,23 +137,27 @@ func (t TextComponent) ToBytes() (ByteArray, error) {
 }
 
 func (t *TextComponent) FromBytes(data ByteArray) (int, error) {
-	bytesRead, err := t.Data.FromBytes(data)
-	if err != nil {
-		return bytesRead, err
-	}
-
 	var nbt NBT
-	if _, nbtErr := nbt.FromBytes(t.Data); nbtErr == nil {
+	if bytesRead, err := nbt.FromBytes(data); err == nil {
+		t.Data = data[:bytesRead]
 		t.parsedNBT = &nbt
 		t.text = nbt.ExtractTextFromNBT()
-	} else {
-		var str String
-		if _, strErr := str.FromBytes(t.Data); strErr == nil {
-			t.text = string(str)
-		}
+		return bytesRead, nil
 	}
 
-	return bytesRead, err
+	var str String
+	if strBytes, err := str.FromBytes(data); err == nil && strBytes > 0 {
+		t.Data = data[:strBytes]
+		if comp, perr := ParseTextComponentFromString(string(str)); perr == nil {
+			t.text = comp.String()
+		} else {
+			t.text = string(str)
+		}
+		t.parsedNBT = nil
+		return strBytes, nil
+	}
+
+	return 0, fmt.Errorf("failed to parse TextComponent: neither NBT nor String parsing succeeded")
 }
 
 // GetText returns the extracted text from the component
@@ -190,25 +194,22 @@ func (t *TextComponent) FromMap(data map[string]any) error {
 		t.text = ""
 		return nil
 	}
-	
-	// Create NBT from map
+
 	nbt := NBT{}
 	err := nbt.FromMap(data)
 	if err != nil {
 		return fmt.Errorf("failed to create NBT from map: %w", err)
 	}
-	
-	// Convert NBT to bytes
+
 	nbtBytes, err := nbt.ToBytes()
 	if err != nil {
 		return fmt.Errorf("failed to encode NBT: %w", err)
 	}
-	
-	// Set the data and parse it
+
 	t.Data = nbtBytes
 	t.parsedNBT = &nbt
 	t.text = nbt.ExtractTextFromNBT()
-	
+
 	return nil
 }
 
@@ -435,13 +436,15 @@ func (p *PrefixedOptional[T]) FromBytes(data ByteArray) (int, error) {
 		return bytesRead + valueBytes, nil
 	}
 
-	// For regular ByteArray without known length, this is problematic
-	// The caller should use FixedByteArray for known sizes
-	if _, isBA := any(p.Value).(ByteArray); isBA {
-		return 0, errors.New("PrefixedOptional[ByteArray] requires FixedByteArray for known sizes")
-	}
+	// HACK: make this respect length defined in slice tags
+	/*if ba, isBA := any(&p.Value).(*ByteArray); isBA {
+		if len(data[bytesRead:]) >= 256 {
+			*ba = data[bytesRead : bytesRead+256]
+			return bytesRead + 256, nil
+		}
+		return 0, errors.New("PrefixedOptional[ByteArray] requires FixedByteArray for known sizes, or 256 bytes for signature data")
+	}*/
 
-	// Use unmarshaler interface
 	if unmarshaler, ok := any(&p.Value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
 		valueBytes, err := unmarshaler.FromBytes(data[bytesRead:])
 		if err != nil {
@@ -489,7 +492,7 @@ func (a Array[T]) ToBytes() (ByteArray, error) {
 // FromBytesWithLength reads a fixed-size array with known length
 func (a *Array[T]) FromBytesWithLength(data ByteArray, length int) (int, error) {
 	*a = make(Array[T], length)
-	
+
 	// Optimize for byte arrays
 	if _, isByte := any(*a).(Array[Byte]); isByte {
 		if len(data) < length {
