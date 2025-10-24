@@ -1130,6 +1130,105 @@ func (l *LightData) FromBytes(data ByteArray) (int, error) {
 	return bytesRead, nil
 }
 
+// GameProfile - describes a Minecraft player profile
+//
+// https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Game_Profile
+type GameProfile struct {
+	UUID       UUID
+	Username   String // max 16
+	Properties PrefixedArray[GameProfileProperty]
+}
+
+type GameProfileProperty struct {
+	Name      String                    // max 64
+	Value     String                    // max 32767
+	Signature PrefixedOptional[String] // max 1024
+}
+
+func (g GameProfile) ToBytes() (ByteArray, error) {
+	result, err := g.UUID.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+
+	usernameBytes, err := g.Username.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, usernameBytes...)
+
+	propsBytes, err := g.Properties.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, propsBytes...)
+
+	return result, nil
+}
+
+func (g *GameProfile) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := g.UUID.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+
+	usernameBytes, err := g.Username.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += usernameBytes
+
+	propsBytes, err := g.Properties.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += propsBytes
+
+	return bytesRead, nil
+}
+
+func (p GameProfileProperty) ToBytes() (ByteArray, error) {
+	result, err := p.Name.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+
+	valueBytes, err := p.Value.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, valueBytes...)
+
+	sigBytes, err := p.Signature.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, sigBytes...)
+
+	return result, nil
+}
+
+func (p *GameProfileProperty) FromBytes(data ByteArray) (int, error) {
+	bytesRead, err := p.Name.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+
+	valueBytes, err := p.Value.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += valueBytes
+
+	sigBytes, err := p.Signature.FromBytes(data[bytesRead:])
+	if err != nil {
+		return 0, err
+	}
+	bytesRead += sigBytes
+
+	return bytesRead, nil
+}
+
 // Or - represents X or Y type
 type Or[X, Y any] struct {
 	IsX  bool
