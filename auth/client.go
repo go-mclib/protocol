@@ -15,15 +15,20 @@ type AuthClient struct {
 	cfg        AuthClientConfig
 	httpClient *http.Client
 	tokenStore TokenStore
+	username   string
 }
 
 // AuthClientConfig is the configuration for the auth client
 type AuthClientConfig struct {
-	ClientID     string
-	RedirectPort int
-	Scopes       []string
-	HTTPClient   *http.Client
-	TokenStore   TokenStore
+	ClientID         string
+	RedirectPort     int
+	Scopes           []string
+	HTTPClient       *http.Client
+	TokenStore       TokenStore
+	TokenStoreConfig TokenStoreConfig
+	// Username is the Minecraft username to use for caching.
+	// If empty, username from login response will be used.
+	Username string
 }
 
 // LoginData is the data returned from a login
@@ -51,14 +56,14 @@ func NewClient(cfg AuthClientConfig) *AuthClient {
 	var store TokenStore
 	if cfg.TokenStore != nil {
 		store = cfg.TokenStore
-	} else if cfg.ClientID != "" {
-		// best-effort default store; if creation fails, continue without caching.
-		if s, err := NewDefaultFileTokenStore(cfg.ClientID); err == nil {
+	} else {
+		// try to create store from config
+		if s, err := NewTokenStore(cfg.TokenStoreConfig); err == nil {
 			store = s
 		}
 	}
 
-	return &AuthClient{cfg: cfg, httpClient: httpClient, tokenStore: store}
+	return &AuthClient{cfg: cfg, httpClient: httpClient, tokenStore: store, username: cfg.Username}
 }
 
 // AuthorizeWithLocalServer starts a local HTTP server and opens a browser to
@@ -168,53 +173,76 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 // completes the Microsoft/XBL/XSTS/Minecraft authentication flow. If no cached
 // token exists or the refresh fails, it falls back to interactive auth via a
 // local HTTP callback and browser, then saves the new refresh token.
+//
+// The username for caching is determined by:
+// 1. The Username field in AuthClientConfig if set
+// 2. The username from the LoginData response (after successful login)
 func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
-	// setup store
 	store := c.tokenStore
-	if store == nil && c.cfg.ClientID != "" {
-		if s, err := NewDefaultFileTokenStore(c.cfg.ClientID); err == nil {
-			store = s
-			c.tokenStore = s
-		}
-	}
 
-	// try cached refresh token
-	if store != nil {
-		if rt, err := store.Load(); err == nil && rt != "" {
+	// try cached refresh token if username is specified
+	if store != nil && c.username != "" {
+		if rt, err := store.Load(c.username); err == nil && rt != "" {
 			if data, err := c.LoginWithRefreshToken(ctx, rt); err == nil {
-				_ = store.Save(data.RefreshToken)
+				// Update username in case it changed
+				c.username = data.Username
+				_ = store.Save(data.Username, data.RefreshToken)
 				return data, nil
 			}
 		}
 	}
 
-	// no cache; must reauthenticate
+	// no cache or cache failed; must reauthenticate
 	rt, err := c.AuthorizeWithLocalServer(ctx)
 	if err != nil {
 		return LoginData{}, err
-	}
-	if store != nil {
-		_ = store.Save(rt)
 	}
 
 	data, err := c.LoginWithRefreshToken(ctx, rt)
 	if err != nil {
 		return LoginData{}, err
 	}
+
+	// Save with the username from login response
+	c.username = data.Username
 	if store != nil {
-		_ = store.Save(data.RefreshToken)
+		_ = store.Save(data.Username, data.RefreshToken)
 	}
 
 	return data, nil
 }
 
-// ClearCachedToken removes any stored refresh token
+// ClearCachedToken removes the stored refresh token for the current username.
+// If username is not set, this returns an error.
 func (c *AuthClient) ClearCachedToken(_ context.Context) error {
 	if c.tokenStore == nil {
 		return nil
 	}
 
-	return c.tokenStore.Clear()
+	if c.username == "" {
+		return errors.New("no username set, cannot clear cached token")
+	}
+
+	return c.tokenStore.Clear(c.username)
+}
+
+// SetUsername updates the username for this client. This affects which cached
+// token is loaded/saved.
+func (c *AuthClient) SetUsername(username string) {
+	c.username = username
+}
+
+// GetUsername returns the current username for this client.
+func (c *AuthClient) GetUsername() string {
+	return c.username
+}
+
+// ListCachedAccounts returns a list of all usernames that have cached tokens.
+func (c *AuthClient) ListCachedAccounts() ([]string, error) {
+	if c.tokenStore == nil {
+		return nil, nil
+	}
+	return c.tokenStore.ListAccounts()
 }
 
 // tryPort tries to find an open port
