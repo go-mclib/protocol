@@ -6,6 +6,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 
 	mc_crypto "github.com/go-mclib/protocol/crypto"
 )
@@ -27,9 +29,14 @@ func NewBaseTCP(conn net.Conn) *BaseTCP {
 }
 
 func (b *BaseTCP) Connect(address string) error {
-	conn, err := net.Dial("tcp", address)
+	resolvedAddr, err := resolveMinecraftAddress(address)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return fmt.Errorf("failed to resolve address: %w", err)
+	}
+
+	conn, err := net.Dial("tcp", resolvedAddr)
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s: %w", resolvedAddr, err)
 	}
 	b.conn = conn
 	return nil
@@ -70,6 +77,33 @@ func (b *BaseTCP) debugf(format string, args ...any) {
 	if b.debug {
 		b.logf(format, args...)
 	}
+}
+
+// resolveMinecraftAddress resolves a Minecraft server address using SRV records
+// if available, falling back to the default port 25565, if no port is specified.
+func resolveMinecraftAddress(address string) (string, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		// no port specified, treat entire address as hostname
+		host = address
+		port = ""
+	}
+
+	// if port is explicitly specified, use it directly without SRV lookup
+	if port != "" {
+		return net.JoinHostPort(host, port), nil
+	}
+
+	// lookup SRV _minecraft._tcp.<host>
+	_, srvRecords, err := net.LookupSRV("minecraft", "tcp", host)
+	if err == nil && len(srvRecords) > 0 {
+		srv := srvRecords[0]
+		target := strings.TrimSuffix(srv.Target, ".")
+		return net.JoinHostPort(target, strconv.Itoa(int(srv.Port))), nil
+	}
+
+	// no SRV record found, use default port
+	return net.JoinHostPort(host, "25565"), nil
 }
 
 // hexSnippet returns a hex string of at most max bytes of data (for debugging)
