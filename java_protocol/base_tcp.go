@@ -28,18 +28,19 @@ func NewBaseTCP(conn net.Conn) *BaseTCP {
 	}
 }
 
-func (b *BaseTCP) Connect(address string) error {
+// Connect connects to a Minecraft server and returns the resolved address
+func (b *BaseTCP) Connect(address string) (string, error) {
 	resolvedAddr, err := resolveMinecraftAddress(address)
 	if err != nil {
-		return fmt.Errorf("failed to resolve address: %w", err)
+		return "", fmt.Errorf("failed to resolve address: %w", err)
 	}
 
 	conn, err := net.Dial("tcp", resolvedAddr)
 	if err != nil {
-		return fmt.Errorf("failed to connect to %s: %w", resolvedAddr, err)
+		return "", fmt.Errorf("failed to connect to %s: %w", resolvedAddr, err)
 	}
 	b.conn = conn
-	return nil
+	return resolvedAddr, nil
 }
 
 func (b *BaseTCP) Close() error {
