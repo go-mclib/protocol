@@ -1140,8 +1140,8 @@ type GameProfile struct {
 }
 
 type GameProfileProperty struct {
-	Name      String                    // max 64
-	Value     String                    // max 32767
+	Name      String                   // max 64
+	Value     String                   // max 32767
 	Signature PrefixedOptional[String] // max 1024
 }
 

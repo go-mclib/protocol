@@ -9,23 +9,71 @@ import (
 	ns "github.com/go-mclib/protocol/net_structures"
 )
 
-// parseLengthFromTag extracts length value from mc tag (e.g., "length:256" returns 256)
-func parseLengthFromTag(tag string) int {
+// FieldTag represents parsed struct tag options for a field
+type FieldTag struct {
+	Skip     bool   // Skip this field (mc:"-")
+	Length   int    // Fixed length for arrays/bitsets (mc:"length:N")
+	IfField  string // Conditional presence based on another field (mc:"if:FieldName")
+	IfValue  string // Required value for conditional (mc:"if:FieldName,value:X")
+	Prefixed bool   // Explicitly mark as length-prefixed (mc:"prefixed")
+	Fixed    bool   // Explicitly mark as fixed-size (mc:"fixed")
+	RawTag   string // The original tag string
+}
+
+// parseFieldTag parses all tag options from mc tag
+// Supported formats:
+//   - mc:"-" : skip field
+//   - mc:"length:256" : fixed length of 256 bytes
+//   - mc:"if:MessageID" : present only if MessageID field is zero
+//   - mc:"if:MessageID,value:0" : present only if MessageID field equals 0
+//   - mc:"prefixed" : length-prefixed array
+//   - mc:"fixed" : fixed-size array (no length prefix)
+//   - mc:"length:20,fixed" : fixed-size array of 20 elements
+func parseFieldTag(tag string) FieldTag {
+	ft := FieldTag{RawTag: tag}
+
 	if tag == "" {
-		return 0
+		return ft
+	}
+
+	if tag == "-" {
+		ft.Skip = true
+		return ft
 	}
 
 	parts := strings.SplitSeq(tag, ",")
 	for part := range parts {
 		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "length:") {
-			lengthStr := strings.TrimPrefix(part, "length:")
-			if length, err := strconv.Atoi(lengthStr); err == nil {
-				return length
+
+		// Parse length
+		if after, ok := strings.CutPrefix(part, "length:"); ok {
+			if length, err := strconv.Atoi(after); err == nil {
+				ft.Length = length
 			}
 		}
+
+		// Parse if condition
+		if after, ok := strings.CutPrefix(part, "if:"); ok {
+			ft.IfField = after
+		}
+
+		// Parse if value
+		if after, ok := strings.CutPrefix(part, "value:"); ok {
+			ft.IfValue = after
+		}
+
+		// Parse prefixed flag
+		if part == "prefixed" {
+			ft.Prefixed = true
+		}
+
+		// Parse fixed flag
+		if part == "fixed" {
+			ft.Fixed = true
+		}
 	}
-	return 0
+
+	return ft
 }
 
 // PacketDataToBytes converts a struct to bytes using reflection
@@ -175,10 +223,34 @@ func unmarshalStruct(val reflect.Value, data ns.ByteArray) (int, error) {
 
 		// parse tags
 		tag := fieldType.Tag.Get("mc")
-		if tag == "-" {
-			continue // skip
+		fieldTag := parseFieldTag(tag)
+
+		// skip tagged fields
+		if fieldTag.Skip {
+			continue
 		}
 
+		// handle conditional fields (e.g., mc:"if:MessageID")
+		if fieldTag.IfField != "" {
+			condField := val.FieldByName(fieldTag.IfField)
+			if condField.IsValid() {
+				shouldBePresent := checkCondition(condField, fieldTag.IfValue)
+
+				// Set presence for Optional types
+				if strings.Contains(field.Type().String(), "Optional") {
+					presentField := field.FieldByName("Present")
+					if presentField.IsValid() && presentField.CanSet() {
+						presentField.SetBool(shouldBePresent)
+					}
+				}
+
+				if !shouldBePresent {
+					continue // skip this field
+				}
+			}
+		}
+
+		// check if we have enough data
 		if offset >= len(data) {
 			fieldTypeName := field.Type().String()
 			if strings.Contains(fieldTypeName, "PrefixedOptional") {
@@ -191,27 +263,6 @@ func unmarshalStruct(val reflect.Value, data ns.ByteArray) (int, error) {
 			return offset, fmt.Errorf("insufficient data for field %s (have %d bytes left, at offset %d of %d total)", fieldType.Name, len(data)-offset, offset, len(data))
 		}
 
-		if i > 0 {
-			prevField := val.Field(i - 1)
-			prevFieldType := typ.Field(i - 1)
-			if prevFieldType.Name == "MessageID" && strings.Contains(field.Type().String(), "Optional") && strings.Contains(field.Type().String(), "FixedByteArray") {
-				var prevIsZero bool
-				switch prevField.Kind() {
-				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-					prevIsZero = prevField.Int() == 0
-				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-					prevIsZero = prevField.Uint() == 0
-				default:
-					if vi, ok := prevField.Interface().(ns.VarInt); ok {
-						prevIsZero = int(vi) == 0
-					}
-				}
-				if presentField := field.FieldByName("Present"); presentField.IsValid() && presentField.CanSet() {
-					presentField.SetBool(prevIsZero)
-				}
-			}
-		}
-
 		bytesConsumed, err := UnmarshalFieldWithTag(field, data[offset:], tag)
 		if err != nil {
 			return offset, fmt.Errorf("error unmarshaling field %s (at offset %d, %d bytes remaining): %w", fieldType.Name, offset, len(data)-offset, err)
@@ -221,6 +272,52 @@ func unmarshalStruct(val reflect.Value, data ns.ByteArray) (int, error) {
 	}
 
 	return offset, nil
+}
+
+// checkCondition evaluates if a conditional field should be present based on another field's value
+func checkCondition(condField reflect.Value, expectedValue string) bool {
+	// If no specific value is required, check if field is zero
+	if expectedValue == "" {
+		switch condField.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return condField.Int() == 0
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return condField.Uint() == 0
+		case reflect.Bool:
+			return !condField.Bool()
+		default:
+			if vi, ok := condField.Interface().(ns.VarInt); ok {
+				return int(vi) == 0
+			}
+			return condField.IsZero()
+		}
+	}
+
+	// Check against expected value
+	switch condField.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if expected, err := strconv.ParseInt(expectedValue, 10, 64); err == nil {
+			return condField.Int() == expected
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if expected, err := strconv.ParseUint(expectedValue, 10, 64); err == nil {
+			return condField.Uint() == expected
+		}
+	case reflect.Bool:
+		if expected, err := strconv.ParseBool(expectedValue); err == nil {
+			return condField.Bool() == expected
+		}
+	case reflect.String:
+		return condField.String() == expectedValue
+	default:
+		if vi, ok := condField.Interface().(ns.VarInt); ok {
+			if expected, err := strconv.ParseInt(expectedValue, 10, 32); err == nil {
+				return int(vi) == int(expected)
+			}
+		}
+	}
+
+	return false
 }
 
 // unmarshalSliceWithReflection handles slice types (including PrefixedArray) using reflection
@@ -304,6 +401,22 @@ func unmarshalOptionalFixedByteArray(field reflect.Value, data ns.ByteArray, len
 	return 0, fmt.Errorf("could not find or set Value field in Optional")
 }
 
+// unmarshalFixedBitSet handles FixedBitSet with length from tag
+func unmarshalFixedBitSet(field reflect.Value, data ns.ByteArray, length int) (int, error) {
+	if lengthField := field.FieldByName("Length"); lengthField.IsValid() && lengthField.CanSet() {
+		lengthField.SetInt(int64(length))
+	}
+
+	bitset := ns.FixedBitSet{Length: length}
+	bytesRead, err := bitset.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+
+	field.Set(reflect.ValueOf(bitset))
+	return bytesRead, nil
+}
+
 // UnmarshalField unmarshals a field without tag information (for backwards compatibility)
 func UnmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 	return UnmarshalFieldWithTag(field, data, "")
@@ -312,23 +425,30 @@ func UnmarshalField(field reflect.Value, data ns.ByteArray) (int, error) {
 // UnmarshalFieldWithTag unmarshals a field with optional struct tag information
 func UnmarshalFieldWithTag(field reflect.Value, data ns.ByteArray, tag string) (int, error) {
 	// handle pointer fields
-	if field.Kind() == reflect.Ptr {
+	if field.Kind() == reflect.Pointer {
 		if field.IsNil() {
 			field.Set(reflect.New(field.Type().Elem()))
 		}
 		field = field.Elem()
 	}
 
-	length := parseLengthFromTag(tag)
-	if length > 0 {
+	fieldTag := parseFieldTag(tag)
+
+	// Handle FixedByteArray with length tag
+	if fieldTag.Length > 0 {
 		if strings.Contains(field.Type().String(), "PrefixedOptional") &&
 			strings.Contains(field.Type().String(), "FixedByteArray") {
-			return unmarshalPrefixedOptionalFixedByteArray(field, data, length)
+			return unmarshalPrefixedOptionalFixedByteArray(field, data, fieldTag.Length)
 		}
 
 		if strings.Contains(field.Type().String(), "Optional") &&
 			strings.Contains(field.Type().String(), "FixedByteArray") {
-			return unmarshalOptionalFixedByteArray(field, data, length)
+			return unmarshalOptionalFixedByteArray(field, data, fieldTag.Length)
+		}
+
+		// Handle FixedBitSet with length tag
+		if strings.Contains(field.Type().String(), "FixedBitSet") {
+			return unmarshalFixedBitSet(field, data, fieldTag.Length)
 		}
 	}
 
@@ -413,4 +533,26 @@ func UnmarshalFieldWithTag(field reflect.Value, data ns.ByteArray, tag string) (
 	default:
 		return 0, fmt.Errorf("unsupported type: %v", field.Type())
 	}
+}
+
+// Helper functions for easier packet creation
+
+// MarshalPacket is a convenience function that creates a packet with data in one call
+func MarshalPacket(state State, bound Bound, packetID ns.VarInt, data any) (*Packet, error) {
+	packet := NewPacket(state, bound, packetID)
+	return packet.WithData(data)
+}
+
+// UnmarshalPacket is a convenience function that unmarshals packet data into a struct
+func UnmarshalPacket(packet *Packet, data any) error {
+	return BytesToPacketData(packet.Data, data)
+}
+
+// MustMarshalPacket is like MarshalPacket but panics on error (useful for static packet definitions)
+func MustMarshalPacket(state State, bound Bound, packetID ns.VarInt, data any) *Packet {
+	packet, err := MarshalPacket(state, bound, packetID, data)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal packet: %v", err))
+	}
+	return packet
 }

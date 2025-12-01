@@ -390,3 +390,228 @@ func TestMultipleFieldsWithDifferentLengths(t *testing.T) {
 		}
 	}
 }
+
+// Test new conditional field feature
+func TestConditionalFields(t *testing.T) {
+	type TestConditionalPacket struct {
+		MessageID ns.VarInt
+		// Signature is only present when MessageID is 0
+		Signature ns.Optional[ns.FixedByteArray] `mc:"if:MessageID,length:256"`
+	}
+
+	t.Run("signature present when MessageID is 0", func(t *testing.T) {
+		original := TestConditionalPacket{
+			MessageID: ns.VarInt(0),
+			Signature: ns.Optional[ns.FixedByteArray]{
+				Present: true,
+				Value:   ns.FixedByteArray{Data: make(ns.ByteArray, 256), Length: 256},
+			},
+		}
+		// Fill signature with test data
+		for i := range original.Signature.Value.Data {
+			original.Signature.Value.Data[i] = byte(i % 256)
+		}
+
+		// Marshal
+		data, err := jp.PacketDataToBytes(original)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		// Unmarshal
+		var result TestConditionalPacket
+		err = jp.BytesToPacketData(data, &result)
+		if err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		// Verify
+		if result.MessageID != 0 {
+			t.Errorf("Expected MessageID 0, got %d", result.MessageID)
+		}
+		if !result.Signature.Present {
+			t.Error("Expected Signature.Present to be true when MessageID is 0")
+		}
+		if len(result.Signature.Value.Data) != 256 {
+			t.Errorf("Expected signature length 256, got %d", len(result.Signature.Value.Data))
+		}
+	})
+
+	t.Run("signature not present when MessageID is non-zero", func(t *testing.T) {
+		original := TestConditionalPacket{
+			MessageID: ns.VarInt(5),
+			Signature: ns.Optional[ns.FixedByteArray]{Present: false},
+		}
+
+		// Marshal
+		data, err := jp.PacketDataToBytes(original)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		// Unmarshal
+		var result TestConditionalPacket
+		err = jp.BytesToPacketData(data, &result)
+		if err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		// Verify
+		if result.MessageID != 5 {
+			t.Errorf("Expected MessageID 5, got %d", result.MessageID)
+		}
+		if result.Signature.Present {
+			t.Error("Expected Signature.Present to be false when MessageID is non-zero")
+		}
+	})
+}
+
+// Test FixedBitSet with length tag
+func TestFixedBitSetWithLength(t *testing.T) {
+	type TestBitSetPacket struct {
+		Flags ns.FixedBitSet `mc:"length:20"`
+	}
+
+	original := TestBitSetPacket{
+		Flags: ns.FixedBitSet{
+			Length: 20,
+			Data:   []byte{0xFF, 0x00, 0xAA}, // 3 bytes for 20 bits
+		},
+	}
+
+	// Marshal
+	data, err := jp.PacketDataToBytes(original)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	// Unmarshal
+	var result TestBitSetPacket
+	err = jp.BytesToPacketData(data, &result)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	// Verify
+	if result.Flags.Length != 20 {
+		t.Errorf("Expected Length 20, got %d", result.Flags.Length)
+	}
+	if len(result.Flags.Data) != 3 {
+		t.Errorf("Expected 3 bytes of data, got %d", len(result.Flags.Data))
+	}
+	if result.Flags.Data[0] != 0xFF || result.Flags.Data[1] != 0x00 || result.Flags.Data[2] != 0xAA {
+		t.Errorf("Data mismatch: got %v, want [0xFF 0x00 0xAA]", result.Flags.Data)
+	}
+}
+
+// Test helper functions
+func TestHelperFunctions(t *testing.T) {
+	type SimplePacket struct {
+		ID   ns.VarInt
+		Name ns.String
+	}
+
+	t.Run("MarshalPacket", func(t *testing.T) {
+		data := SimplePacket{
+			ID:   ns.VarInt(42),
+			Name: ns.String("test"),
+		}
+
+		packet, err := jp.MarshalPacket(jp.StatePlay, jp.C2S, 0x10, data)
+		if err != nil {
+			t.Fatalf("MarshalPacket failed: %v", err)
+		}
+
+		if packet.State != jp.StatePlay {
+			t.Errorf("Expected StatePlay, got %v", packet.State)
+		}
+		if packet.Bound != jp.C2S {
+			t.Errorf("Expected C2S, got %v", packet.Bound)
+		}
+		if packet.PacketID != 0x10 {
+			t.Errorf("Expected PacketID 0x10, got %v", packet.PacketID)
+		}
+	})
+
+	t.Run("UnmarshalPacket", func(t *testing.T) {
+		original := SimplePacket{
+			ID:   ns.VarInt(99),
+			Name: ns.String("hello"),
+		}
+
+		packet, err := jp.MarshalPacket(jp.StateLogin, jp.S2C, 0x05, original)
+		if err != nil {
+			t.Fatalf("MarshalPacket failed: %v", err)
+		}
+
+		var result SimplePacket
+		err = jp.UnmarshalPacket(packet, &result)
+		if err != nil {
+			t.Fatalf("UnmarshalPacket failed: %v", err)
+		}
+
+		if result.ID != original.ID {
+			t.Errorf("ID mismatch: got %v, want %v", result.ID, original.ID)
+		}
+		if result.Name != original.Name {
+			t.Errorf("Name mismatch: got %v, want %v", result.Name, original.Name)
+		}
+	})
+}
+
+// Test realistic packet: Chat message (C2S)
+func TestRealisticChatPacket(t *testing.T) {
+	type C2SChatData struct {
+		Message      ns.String
+		Timestamp    ns.Long
+		Salt         ns.Long
+		Signature    ns.PrefixedOptional[ns.FixedByteArray] `mc:"length:256"`
+		MessageCount ns.VarInt
+		Acknowledged ns.FixedBitSet `mc:"length:20"`
+	}
+
+	original := C2SChatData{
+		Message:      ns.String("Hello, world!"),
+		Timestamp:    ns.Long(1234567890),
+		Salt:         ns.Long(9876543210),
+		Signature:    ns.PrefixedOptional[ns.FixedByteArray]{Present: false},
+		MessageCount: ns.VarInt(5),
+		Acknowledged: ns.FixedBitSet{
+			Length: 20,
+			Data:   []byte{0x12, 0x34, 0x56},
+		},
+	}
+
+	// Marshal
+	data, err := jp.PacketDataToBytes(original)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	// Unmarshal
+	var result C2SChatData
+	err = jp.BytesToPacketData(data, &result)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	// Verify
+	if result.Message != original.Message {
+		t.Errorf("Message mismatch: got %v, want %v", result.Message, original.Message)
+	}
+	if result.Timestamp != original.Timestamp {
+		t.Errorf("Timestamp mismatch: got %v, want %v", result.Timestamp, original.Timestamp)
+	}
+	if result.Salt != original.Salt {
+		t.Errorf("Salt mismatch: got %v, want %v", result.Salt, original.Salt)
+	}
+	if result.Signature.Present {
+		t.Error("Expected Signature.Present to be false")
+	}
+	if result.MessageCount != original.MessageCount {
+		t.Errorf("MessageCount mismatch: got %v, want %v", result.MessageCount, original.MessageCount)
+	}
+	if result.Acknowledged.Length != 20 {
+		t.Errorf("Acknowledged.Length mismatch: got %v, want 20", result.Acknowledged.Length)
+	}
+}
