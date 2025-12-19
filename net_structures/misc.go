@@ -1302,3 +1302,91 @@ func (o *Or[X, Y]) FromBytes(data ByteArray) (int, error) {
 		}
 	}
 }
+
+// PrefixedMap - VarInt-prefixed map of key-value pairs
+// Encoded as: VarInt(count) + (key, value) pairs
+type PrefixedMap[K comparable, V any] map[K]V
+
+func (m PrefixedMap[K, V]) ToBytes() (ByteArray, error) {
+	// Encode count
+	count := VarInt(len(m))
+	result, err := count.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+
+	// Encode each key-value pair
+	for key, value := range m {
+		// Encode key
+		if marshaler, ok := any(key).(interface{ ToBytes() (ByteArray, error) }); ok {
+			keyBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, fmt.Errorf("error marshaling map key: %w", err)
+			}
+			result = append(result, keyBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", key)
+		}
+
+		// Encode value
+		if marshaler, ok := any(value).(interface{ ToBytes() (ByteArray, error) }); ok {
+			valueBytes, err := marshaler.ToBytes()
+			if err != nil {
+				return nil, fmt.Errorf("error marshaling map value: %w", err)
+			}
+			result = append(result, valueBytes...)
+		} else {
+			return nil, fmt.Errorf("type %T does not implement ToBytes method", value)
+		}
+	}
+
+	return result, nil
+}
+
+func (m *PrefixedMap[K, V]) FromBytes(data ByteArray) (int, error) {
+	var count VarInt
+	bytesRead, err := count.FromBytes(data)
+	if err != nil {
+		return 0, err
+	}
+
+	if count < 0 {
+		return 0, errors.New("negative map count")
+	}
+
+	// Initialize map
+	*m = make(PrefixedMap[K, V], count)
+	offset := bytesRead
+
+	// Decode each key-value pair
+	for i := 0; i < int(count); i++ {
+		var key K
+		var value V
+
+		// Decode key
+		if unmarshaler, ok := any(&key).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			keyBytes, err := unmarshaler.FromBytes(data[offset:])
+			if err != nil {
+				return 0, fmt.Errorf("error unmarshaling map key %d: %w", i, err)
+			}
+			offset += keyBytes
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", key)
+		}
+
+		// Decode value
+		if unmarshaler, ok := any(&value).(interface{ FromBytes(ByteArray) (int, error) }); ok {
+			valueBytes, err := unmarshaler.FromBytes(data[offset:])
+			if err != nil {
+				return 0, fmt.Errorf("error unmarshaling map value %d: %w", i, err)
+			}
+			offset += valueBytes
+		} else {
+			return 0, fmt.Errorf("type %T does not implement FromBytes method", value)
+		}
+
+		(*m)[key] = value
+	}
+
+	return offset, nil
+}
