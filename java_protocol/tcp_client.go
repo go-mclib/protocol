@@ -36,6 +36,10 @@ func (c *TCPClient) SetCompressionThreshold(threshold int) {
 }
 
 func (c *TCPClient) WritePacket(packet *Packet) error {
+	if c.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
 	data, err := packet.ToBytes(c.compressionThreshold)
 	if err != nil {
 		return fmt.Errorf("failed to marshal packet: %w", err)
