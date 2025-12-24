@@ -63,6 +63,10 @@ func (c *TCPClient) WritePacket(packet *Packet) error {
 }
 
 func (c *TCPClient) ReadPacket() (*Packet, error) {
+	if c.conn == nil {
+		return nil, fmt.Errorf("connection is nil")
+	}
+	
 	c.debugf("<- recv: waiting for packet length varint")
 	packetLength, err := c.readVarInt()
 	if err != nil {
