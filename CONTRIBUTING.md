@@ -24,4 +24,4 @@ Try to make the codebase relatively readable, modular, easy to understand/mainta
 
 ### Testing
 
-The codebase is tested with [Go's built-in testing framework](https://go.dev/doc/testing). The tests are located in a separate package (ending with `_test`). You can run all of them with `go test ./...`.
+The unit tests are located in a separate package (ending with `_test`). Apart from testing each package, they also focus on validating the packet mappings against packet dumps for the specific Minecraft version. You can run all of them with `go test ./...`.

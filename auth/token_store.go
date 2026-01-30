@@ -6,12 +6,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
-// TokenStore defines an interface to persist and retrieve refresh tokens for multiple accounts.
+// CachedSession represents a cached authentication session.
+type CachedSession struct {
+	AccessToken  string    `json:"accessToken"`
+	RefreshToken string    `json:"refreshToken"`
+	UUID         string    `json:"uuid"`
+	Username     string    `json:"username"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+}
+
+// IsValid returns true if the session has a valid access token that hasn't expired.
+// Uses a 5-minute buffer to avoid edge cases.
+func (s *CachedSession) IsValid() bool {
+	if s == nil || s.AccessToken == "" {
+		return false
+	}
+	return time.Now().Add(5 * time.Minute).Before(s.ExpiresAt)
+}
+
+// TokenStore defines an interface to persist and retrieve sessions for multiple accounts.
 type TokenStore interface {
-	Save(username, refreshToken string) error
-	Load(username string) (string, error)
+	SaveSession(session *CachedSession) error
+	LoadSession(username string) (*CachedSession, error)
 	Clear(username string) error
 	ListAccounts() ([]string, error)
 }
@@ -69,31 +88,31 @@ func NewTokenStore(config TokenStoreConfig) (TokenStore, error) {
 	return &fileTokenStore{filePath: path}, nil
 }
 
-func (s *fileTokenStore) Save(username, refreshToken string) error {
-	if username == "" {
-		return errors.New("username cannot be empty")
+func (s *fileTokenStore) SaveSession(session *CachedSession) error {
+	if session == nil || session.Username == "" {
+		return errors.New("session with username is required")
 	}
 
-	tokens, err := s.loadTokens()
+	sessions, err := s.loadSessions()
 	if err != nil {
 		return err
 	}
 
-	tokens[username] = refreshToken
-	return s.saveTokens(tokens)
+	sessions[session.Username] = session
+	return s.saveSessions(sessions)
 }
 
-func (s *fileTokenStore) Load(username string) (string, error) {
+func (s *fileTokenStore) LoadSession(username string) (*CachedSession, error) {
 	if username == "" {
-		return "", errors.New("username cannot be empty")
+		return nil, errors.New("username cannot be empty")
 	}
 
-	tokens, err := s.loadTokens()
+	sessions, err := s.loadSessions()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return tokens[username], nil
+	return sessions[username], nil
 }
 
 func (s *fileTokenStore) Clear(username string) error {
@@ -101,62 +120,74 @@ func (s *fileTokenStore) Clear(username string) error {
 		return errors.New("username cannot be empty")
 	}
 
-	tokens, err := s.loadTokens()
+	sessions, err := s.loadSessions()
 	if err != nil {
 		return err
 	}
 
-	delete(tokens, username)
+	delete(sessions, username)
 
 	// If no accounts remain, remove the file
-	if len(tokens) == 0 {
+	if len(sessions) == 0 {
 		return os.Remove(s.filePath)
 	}
 
-	return s.saveTokens(tokens)
+	return s.saveSessions(sessions)
 }
 
 func (s *fileTokenStore) ListAccounts() ([]string, error) {
-	tokens, err := s.loadTokens()
+	sessions, err := s.loadSessions()
 	if err != nil {
 		return nil, err
 	}
 
-	accounts := make([]string, 0, len(tokens))
-	for username := range tokens {
+	accounts := make([]string, 0, len(sessions))
+	for username := range sessions {
 		accounts = append(accounts, username)
 	}
 
 	return accounts, nil
 }
 
-func (s *fileTokenStore) loadTokens() (map[string]string, error) {
+func (s *fileTokenStore) loadSessions() (map[string]*CachedSession, error) {
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return make(map[string]string), nil
+			return make(map[string]*CachedSession), nil
 		}
 		return nil, err
 	}
 
 	if len(data) == 0 {
-		return make(map[string]string), nil
+		return make(map[string]*CachedSession), nil
 	}
 
-	var tokens map[string]string
-	if err := json.Unmarshal(data, &tokens); err != nil {
+	var sessions map[string]*CachedSession
+	if err := json.Unmarshal(data, &sessions); err != nil {
+		// Try to migrate from old format (map[string]string with just refresh tokens)
+		var oldTokens map[string]string
+		if jsonErr := json.Unmarshal(data, &oldTokens); jsonErr == nil {
+			sessions = make(map[string]*CachedSession)
+			for username, refreshToken := range oldTokens {
+				sessions[username] = &CachedSession{
+					RefreshToken: refreshToken,
+					Username:     username,
+				}
+			}
+			return sessions, nil
+		}
 		return nil, fmt.Errorf("failed to parse credentials file: %w", err)
 	}
 
-	if tokens == nil {
-		tokens = make(map[string]string)
+	if sessions == nil {
+		sessions = make(map[string]*CachedSession)
 	}
 
-	return tokens, nil
+	return sessions, nil
 }
 
-func (s *fileTokenStore) saveTokens(tokens map[string]string) error {
-	data, err := json.MarshalIndent(tokens, "", "  ")
+func (s *fileTokenStore) saveSessions(sessions map[string]*CachedSession) error {
+	data, err := json.MarshalIndent(sessions, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
@@ -170,44 +201,44 @@ func (s *fileTokenStore) saveTokens(tokens map[string]string) error {
 }
 
 // memoryTokenStore is an in-memory implementation of TokenStore.
-// It does not persist tokens to disk.
+// It does not persist sessions to disk.
 type memoryTokenStore struct {
-	tokens map[string]string
+	sessions map[string]*CachedSession
 }
 
 // newMemoryTokenStore creates a new in-memory token store.
 func newMemoryTokenStore() TokenStore {
 	return &memoryTokenStore{
-		tokens: make(map[string]string),
+		sessions: make(map[string]*CachedSession),
 	}
 }
 
-func (m *memoryTokenStore) Save(username, refreshToken string) error {
-	if username == "" {
-		return errors.New("username cannot be empty")
+func (m *memoryTokenStore) SaveSession(session *CachedSession) error {
+	if session == nil || session.Username == "" {
+		return errors.New("session with username is required")
 	}
-	m.tokens[username] = refreshToken
+	m.sessions[session.Username] = session
 	return nil
 }
 
-func (m *memoryTokenStore) Load(username string) (string, error) {
+func (m *memoryTokenStore) LoadSession(username string) (*CachedSession, error) {
 	if username == "" {
-		return "", errors.New("username cannot be empty")
+		return nil, errors.New("username cannot be empty")
 	}
-	return m.tokens[username], nil
+	return m.sessions[username], nil
 }
 
 func (m *memoryTokenStore) Clear(username string) error {
 	if username == "" {
 		return errors.New("username cannot be empty")
 	}
-	delete(m.tokens, username)
+	delete(m.sessions, username)
 	return nil
 }
 
 func (m *memoryTokenStore) ListAccounts() ([]string, error) {
-	accounts := make([]string, 0, len(m.tokens))
-	for username := range m.tokens {
+	accounts := make([]string, 0, len(m.sessions))
+	for username := range m.sessions {
 		accounts = append(accounts, username)
 	}
 	return accounts, nil

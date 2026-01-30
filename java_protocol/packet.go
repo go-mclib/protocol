@@ -20,15 +20,20 @@ import (
 	"bytes"
 	"compress/zlib"
 	"fmt"
+	"io"
 
 	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
 )
 
-// PacketData is the interface that all packet data types must implement.
-// This replaces reflection-based serialization with explicit Read/Write methods.
-type PacketData interface {
+// Packet is the interface that all typed packet implementations must satisfy.
+// Each packet knows its ID, protocol state, and direction.
+type Packet interface {
 	// ID returns the packet ID for this packet type.
 	ID() ns.VarInt
+	// State returns the protocol state this packet belongs to.
+	State() State
+	// Bound returns the direction of this packet (C2S or S2C).
+	Bound() Bound
 	// Read deserializes the packet data from the buffer.
 	Read(buf *ns.PacketBuffer) error
 	// Write serializes the packet data to the buffer.
@@ -61,95 +66,170 @@ const (
 	S2C
 )
 
-// The top-level packet struct.
-//
-// This is the base struct for all packets.
-// It contains the phase, bound, packet ID, and data, as Go structs.
-type Packet struct {
-	// The state of the packet (handshake, status, login, configuration, play), not sent over network
-	State State
-	// The direction of the packet, not sent over network
-	Bound Bound
-	// The ID of the packet, represented as a `VarInt`.
+// WirePacket represents the raw packet as it appears on the wire.
+// It contains only wire-level data without typed field information.
+type WirePacket struct {
+	// Length is the total length of (PacketID + Data) as read from the wire.
+	Length ns.VarInt
+	// PacketID is the packet identifier.
 	PacketID ns.VarInt
-	// The raw body bytes of the packet (already-encoded fields minus the Packet ID)
+	// Data is the raw payload bytes (without the packet ID).
 	Data ns.ByteArray
 }
 
-// NewPacket creates a packet template with no body data.
-func NewPacket(state State, bound Bound, packetID ns.VarInt) *Packet {
-	return &Packet{
-		State:    state,
-		Bound:    bound,
+// ReadWirePacketFrom reads a WirePacket from the given reader.
+// Handles both compressed and uncompressed packet formats based on compressionThreshold.
+// Use compressionThreshold < 0 to disable compression.
+func ReadWirePacketFrom(r io.Reader, compressionThreshold int) (*WirePacket, error) {
+	packetLength, err := ns.DecodeVarInt(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read packet length: %w", err)
+	}
+
+	data := make([]byte, packetLength)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return nil, fmt.Errorf("failed to read packet data: %w", err)
+	}
+
+	reader := bytes.NewReader(data)
+
+	if compressionThreshold >= 0 {
+		return readCompressedPacket(reader, packetLength)
+	}
+	return readUncompressedPacket(reader, packetLength)
+}
+
+func readUncompressedPacket(reader *bytes.Reader, length ns.VarInt) (*WirePacket, error) {
+	packetID, err := ns.DecodeVarInt(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read packet ID: %w", err)
+	}
+
+	remainingData, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remaining data: %w", err)
+	}
+
+	return &WirePacket{
+		Length:   length,
 		PacketID: packetID,
-		Data:     nil,
-	}
+		Data:     ns.ByteArray(remainingData),
+	}, nil
 }
 
-// WithPacketData serializes the PacketData using its Write method
-// and returns the packet with the data bytes set.
-func (p *Packet) WithPacketData(data PacketData) (*Packet, error) {
-	if p == nil {
-		return nil, fmt.Errorf("nil packet template")
+func readCompressedPacket(reader *bytes.Reader, length ns.VarInt) (*WirePacket, error) {
+	dataLength, err := ns.DecodeVarInt(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data length: %w", err)
 	}
-	buf := ns.NewWriter()
-	if err := data.Write(buf); err != nil {
-		return nil, fmt.Errorf("failed to write packet data: %w", err)
+
+	// dataLength == 0 means uncompressed despite compression being enabled
+	if dataLength == 0 {
+		return readUncompressedPacket(reader, length)
 	}
-	p.Data = buf.Bytes()
-	return p, nil
+
+	// uncompress
+	compressedData, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read compressed data: %w", err)
+	}
+	uncompressedData, err := decompressZlib(compressedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress: %w", err)
+	}
+
+	// read uncompressed
+	uncompressedReader := bytes.NewReader(uncompressedData)
+	packetID, err := ns.DecodeVarInt(uncompressedReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read packet ID: %w", err)
+	}
+
+	// remaining data is the packet data
+	remainingData, err := io.ReadAll(uncompressedReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remaining data: %w", err)
+	}
+	return &WirePacket{
+		Length:   length,
+		PacketID: packetID,
+		Data:     ns.ByteArray(remainingData),
+	}, nil
 }
 
-// ReadPacketData deserializes the packet's raw data into a PacketData struct.
-func (p *Packet) ReadPacketData(data PacketData) error {
-	if p == nil {
-		return fmt.Errorf("nil packet")
-	}
-	buf := ns.NewReader(p.Data)
-	return data.Read(buf)
-}
-
-// FromPacketData creates a new Packet from a PacketData implementation.
-// It uses the packet's ID() method to set the packet ID.
-func FromPacketData(state State, bound Bound, data PacketData) (*Packet, error) {
-	packet := NewPacket(state, bound, data.ID())
-	return packet.WithPacketData(data)
-}
-
-// ToBytes marshals the packet into a byte array that can be sent over the network.
+// WriteTo writes the WirePacket to the given writer.
+// Handles both compressed and uncompressed packet formats based on compressionThreshold.
+// Use compressionThreshold < 0 to disable compression.
 //
-// If `compressionThreshold` is non-negative, compression is enabled.
-// The format of the raw packet varies, depending on compression.
-//
-// > Once a Set Compression packet (with a non-negative threshold) is sent, zlib compression
-// is enabled for all following packets. The format of a packet changes slightly to include
-// the size of the uncompressed packet. For serverbound packets, the uncompressed length of
-// (Packet ID + Data) must not be greater than 223 or 8388608 bytes. Note that a length equal
-// to 223 is permitted, which differs from the compressed length limit. The vanilla client, on
-// the other hand, has no limit for the uncompressed length of incoming compressed packets.
-//
-// > If the size of the buffer containing the packet data and ID (as a VarInt) is smaller than the
-// threshold specified in the packet Set Compression. It will be sent as uncompressed.
-// This is done by setting the data length as 0. (Comparable to sending a non-compressed format
-// with an extra 0 between the length, and packet data).
-//
-// > If it's larger than or equal to the threshold, then it follows the regular compressed protocol format.
-//
-// > The vanilla server (but not client) rejects compressed packets smaller than the threshold.
-// > Uncompressed packets exceeding the threshold, however, are accepted.
-//
-// > Compression can be disabled by sending the packet Set Compression with a negative Threshold,
-// > or not sending the Set Compression packet at all."
+// Compression behavior (per Minecraft protocol):
+//   - If size >= threshold: packet is zlib compressed
+//   - If size < threshold: packet is sent uncompressed (with Data Length = 0)
+//   - The vanilla server rejects compressed packets smaller than the threshold
 //
 // See https://minecraft.wiki/w/Java_Edition_protocol/Packets#Packet_format
-func (p *Packet) ToBytes(compressionThreshold int) (ns.ByteArray, error) {
+func (w *WirePacket) WriteTo(writer io.Writer, compressionThreshold int) error {
+	var data []byte
+	var err error
 	if compressionThreshold >= 0 {
-		return p.toBytesCompressed(compressionThreshold)
+		data, err = w.toBytesCompressed(compressionThreshold)
 	} else {
-		return p.toBytesUncompressed()
+		data, err = w.toBytesUncompressed()
 	}
+	if err != nil {
+		return fmt.Errorf("failed to serialize packet: %w", err)
+	}
+	_, err = writer.Write(data)
+	return err
 }
 
+// ReadInto deserializes the wire packet's raw data into a typed Packet.
+// Returns an error if the packet ID doesn't match.
+func (w *WirePacket) ReadInto(p Packet) error {
+	if w == nil {
+		return fmt.Errorf("nil wire packet")
+	}
+	if w.PacketID != p.ID() {
+		return fmt.Errorf("packet ID mismatch: expected 0x%02X, got 0x%02X", p.ID(), w.PacketID)
+	}
+	buf := ns.NewReader(w.Data)
+	return p.Read(buf)
+}
+
+// ReadPacket deserializes a WirePacket into a typed Packet using generics.
+// This provides type-safe packet reading without manual type assertions.
+//
+// Example:
+//
+//	wire, _ := client.ReadWirePacket()
+//	login, err := ReadPacket[LoginSuccessPacket](wire)
+func ReadPacket[T any, PT interface {
+	*T
+	Packet
+}](wire *WirePacket) (PT, error) {
+	p := new(T)
+	pt := PT(p)
+	if err := wire.ReadInto(pt); err != nil {
+		return nil, err
+	}
+	return pt, nil
+}
+
+// ToWire converts a typed Packet to a WirePacket by serializing its data.
+// The resulting WirePacket can then be written to a connection via WriteTo()
+// or converted to bytes via ToBytes().
+func ToWire(p Packet) (*WirePacket, error) {
+	buf := ns.NewWriter()
+	if err := p.Write(buf); err != nil {
+		return nil, fmt.Errorf("failed to serialize packet data: %w", err)
+	}
+	return &WirePacket{
+		PacketID: p.ID(),
+		Data:     buf.Bytes(),
+	}, nil
+}
+
+// toBytesCompressed serializes with compression framing.
+//
 // Structure:
 //
 //	if (size >= networkCompressionThreshold)
@@ -164,21 +244,18 @@ func (p *Packet) ToBytes(compressionThreshold int) (ns.ByteArray, error) {
 //		data: ByteArray(Data)
 //
 // https://minecraft.wiki/w/Java_Edition_protocol/Packets#With_compression
-func (p *Packet) toBytesCompressed(compressionThreshold int) (ns.ByteArray, error) {
-	// marshal packet ID and use raw body bytes
-	packetIDBytes, err := p.PacketID.ToBytes()
+func (w *WirePacket) toBytesCompressed(compressionThreshold int) ([]byte, error) {
+	packetIDBytes, err := w.PacketID.ToBytes()
 	if err != nil {
 		return nil, err
 	}
-	uncompressedPayload := append(packetIDBytes, p.Data...)
+	uncompressedPayload := append(packetIDBytes, w.Data...)
 	uncompressedLength := len(uncompressedPayload)
 
-	// threshold check
 	if uncompressedLength >= compressionThreshold {
-		// compress the payload (marshalled packet ID + marshalled data)
+		// Compress the payload
 		compressedPayload := compressZlib(uncompressedPayload)
 
-		// build packet
 		dataLengthBytes, err := ns.VarInt(uncompressedLength).ToBytes()
 		if err != nil {
 			return nil, err
@@ -190,22 +267,24 @@ func (p *Packet) toBytesCompressed(compressionThreshold int) (ns.ByteArray, erro
 		}
 
 		return append(packetLengthBytes, packetContent...), nil
-	} else {
-		// uncompressed
-		dataLengthBytes, err := ns.VarInt(0).ToBytes() // 0 indicates uncompressed
-		if err != nil {
-			return nil, err
-		}
-		packetContent := append(dataLengthBytes, uncompressedPayload...)
-		packetLengthBytes, err := ns.VarInt(len(packetContent)).ToBytes()
-		if err != nil {
-			return nil, err
-		}
-
-		return append(packetLengthBytes, packetContent...), nil
 	}
+
+	// Uncompressed (below threshold)
+	dataLengthBytes, err := ns.VarInt(0).ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	packetContent := append(dataLengthBytes, uncompressedPayload...)
+	packetLengthBytes, err := ns.VarInt(len(packetContent)).ToBytes()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(packetLengthBytes, packetContent...), nil
 }
 
+// toBytesUncompressed serializes without compression.
+//
 // Structure:
 //
 //	packetLength: VarInt(Length of Packet ID + Data) +
@@ -213,15 +292,13 @@ func (p *Packet) toBytesCompressed(compressionThreshold int) (ns.ByteArray, erro
 //	data: ByteArray(Data)
 //
 // https://minecraft.wiki/w/Java_Edition_protocol/Packets#Without_compression
-func (p *Packet) toBytesUncompressed() (ns.ByteArray, error) {
-	// marshal packet ID and use raw body bytes
-	packetIDBytes, err := p.PacketID.ToBytes()
+func (w *WirePacket) toBytesUncompressed() ([]byte, error) {
+	packetIDBytes, err := w.PacketID.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 
-	// build packet
-	payload := append(packetIDBytes, p.Data...)
+	payload := append(packetIDBytes, w.Data...)
 	packetLengthBytes, err := ns.VarInt(len(payload)).ToBytes()
 	if err != nil {
 		return nil, err
@@ -236,4 +313,14 @@ func compressZlib(data []byte) []byte {
 	writer.Write(data)
 	writer.Close()
 	return compressedData.Bytes()
+}
+
+func decompressZlib(data []byte) ([]byte, error) {
+	reader, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	return io.ReadAll(reader)
 }

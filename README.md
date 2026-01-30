@@ -10,13 +10,14 @@ Also note that this library is not yet stable. The API is subject to change. The
 
 ## Using the library in your project
 
-This project is still in its early stages, so there are no tagged releases yet. You can use the `@<protocol-version>` branch to get the latest changes. For example:
+This project is still in its early stages, so there are no tagged releases yet. You can use the `@<protocol-version>` tag to get a tag for specific protocol version. For example:
 
 ```bash
-go get github.com/go-mclib/protocol@772
+# for 1.21.11 (protocol version 774)
+go get github.com/go-mclib/protocol@774
 ```
 
-Replace `772` with the protocol version (branch) you want to use.
+Replace `774` with the protocol version (tag) you want to use.
 
 ## Quick Q&A
 
@@ -30,7 +31,7 @@ I can't recommend the [Minecraft Wiki](https://minecraft.wiki/w/Java_Edition_pro
 
 ### How do I use this library as is (at the low-level)?
 
-Check [go-mclib/client:example_bot.go](https://github.com/go-mclib/client/blob/938d84503cc368f59024a4911586b79ee943204a/example_client.go) for a low-level example of how to use this library. This code is the first ever working AFK bot (capable of joining a server and staying idle) that was made with this library. This also means that the code is messy, however, it works. It should give you a good idea of what the library is capable of and how to use the Minecraft protocol to create a bare-minimum bot.
+Check [go-mclib/client:example_bot.go](https://github.com/go-mclib/client/blob/938d84503cc368f59024a4911586b79ee943204a/example_client.go) for a low-level example of how to use this library. This code was the first ever working AFK bot (capable of joining a server and staying idle) that was made with this library. This also means that the code is messy, however, it works. It should give you a good idea of what the library is capable of and how to use the Minecraft protocol to create a bare-minimum bot.
 
 ### Is Bedrock Edition supported?
 
@@ -38,9 +39,9 @@ Not at the moment, but maybe in the future through a separate package (e. g. `be
 
 ### Why is Minecraft version `X` not supported?
 
-Since I am the only one maintaining this project at the moment, adding concurrent support for older Minecraft versions is practically impossible, also given my limited spare time constraints. Therefore, the library has a "live in the moment" policy, where a branch resembles a specific protocol version. For example, the `772` branch is the latest version of the library that supports Minecraft: Java Edition 1.21.8 and was only tested on that version.
+Since I am the only one maintaining this project at the moment, adding concurrent support for older Minecraft versions is practically impossible, also given the limited spare time I have. Therefore, the library has a "live in the moment" policy, where only the latest version of the Minecraft Java Edition protocol is supported.
 
-It is possible that the library might work for older/newer versions (assuming that there were no breaking changes in terms of the networking or packet structures), but I cannot guarantee that. Feel free to experiment and open a PR to help making the library more versatile.
+It is possible that the library might work with older/newer versions (assuming that there were no breaking changes in terms of the networking or packet structures), but I cannot guarantee that. Feel free to experiment and open a PR to help making the library more versatile.
 
 ## Contributing
 

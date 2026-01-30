@@ -3,7 +3,7 @@ package session_server_test
 import (
 	"testing"
 
-	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
+	"github.com/go-mclib/protocol/java_protocol/net_structures"
 	"github.com/go-mclib/protocol/java_protocol/session_server"
 )
 
@@ -45,7 +45,7 @@ func TestValidateUUID(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result := ns.ValidateUUID(test.uuid)
+		result := net_structures.ValidateUUID(test.uuid)
 		if result != test.expected {
 			t.Errorf("ValidateUUID(%q) = %v, expected %v", test.uuid, result, test.expected)
 		}

@@ -37,6 +37,29 @@ type LoginData struct {
 	RefreshToken string
 	UUID         string
 	Username     string
+	ExpiresAt    time.Time
+}
+
+// ToSession converts LoginData to a CachedSession for storage.
+func (d LoginData) ToSession() *CachedSession {
+	return &CachedSession{
+		AccessToken:  d.AccessToken,
+		RefreshToken: d.RefreshToken,
+		UUID:         d.UUID,
+		Username:     d.Username,
+		ExpiresAt:    d.ExpiresAt,
+	}
+}
+
+// FromSession creates LoginData from a CachedSession.
+func FromSession(s *CachedSession) LoginData {
+	return LoginData{
+		AccessToken:  s.AccessToken,
+		RefreshToken: s.RefreshToken,
+		UUID:         s.UUID,
+		Username:     s.Username,
+		ExpiresAt:    s.ExpiresAt,
+	}
 }
 
 // NewClient creates a new AuthClient with the given configuration
@@ -160,19 +183,22 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 		return LoginData{}, errors.New("minecraft profile not found for account")
 	}
 
+	// Calculate expiry time from expires_in (seconds)
+	expiresAt := time.Now().Add(time.Duration(mcAuth.ExpiresIn) * time.Second)
+
 	return LoginData{
 		AccessToken:  mcAuth.AccessToken,
 		RefreshToken: refreshToken,
 		UUID:         profile.ID,
 		Username:     profile.Name,
+		ExpiresAt:    expiresAt,
 	}, nil
 }
 
-// Login performs a cached login. It attempts to load a refresh token from the
-// configured TokenStore (or the default file-based store), refreshes it, and
-// completes the Microsoft/XBL/XSTS/Minecraft authentication flow. If no cached
-// token exists or the refresh fails, it falls back to interactive auth via a
-// local HTTP callback and browser, then saves the new refresh token.
+// Login performs a cached login. It first checks for a valid cached session
+// (with unexpired access token). If no valid session exists, it attempts to
+// refresh using the stored refresh token. If that fails, it falls back to
+// interactive auth via a local HTTP callback and browser.
 //
 // The username for caching is determined by:
 // 1. The Username field in AuthClientConfig if set
@@ -180,19 +206,27 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 	store := c.tokenStore
 
-	// try cached refresh token if username is specified
+	// Try cached session if username is specified
 	if store != nil && c.username != "" {
-		if rt, err := store.Load(c.username); err == nil && rt != "" {
-			if data, err := c.LoginWithRefreshToken(ctx, rt); err == nil {
-				// Update username in case it changed
-				c.username = data.Username
-				_ = store.Save(data.Username, data.RefreshToken)
-				return data, nil
+		if session, err := store.LoadSession(c.username); err == nil && session != nil {
+			// Check if session is still valid (access token not expired)
+			if session.IsValid() {
+				c.username = session.Username
+				return FromSession(session), nil
+			}
+
+			// Session expired but we have a refresh token - try to refresh
+			if session.RefreshToken != "" {
+				if data, err := c.LoginWithRefreshToken(ctx, session.RefreshToken); err == nil {
+					c.username = data.Username
+					_ = store.SaveSession(data.ToSession())
+					return data, nil
+				}
 			}
 		}
 	}
 
-	// no cache or cache failed; must reauthenticate
+	// No cache or cache failed; must reauthenticate
 	rt, err := c.AuthorizeWithLocalServer(ctx)
 	if err != nil {
 		return LoginData{}, err
@@ -203,10 +237,10 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 		return LoginData{}, err
 	}
 
-	// Save with the username from login response
+	// Save session with the username from login response
 	c.username = data.Username
 	if store != nil {
-		_ = store.Save(data.Username, data.RefreshToken)
+		_ = store.SaveSession(data.ToSession())
 	}
 
 	return data, nil

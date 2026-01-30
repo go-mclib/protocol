@@ -189,8 +189,6 @@ func ComputeServerHash(serverID string, sharedSecret, publicKey []byte) string {
 	return hasher.HexDigest()
 }
 
-// ValidateAccessToken validates an access token format.
-// Should be non-empty and reasonable length
 func ValidateAccessToken(token string) bool {
 	return len(token) > 10 && len(token) < 2048
 }
