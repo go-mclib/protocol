@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/go-mclib/protocol/crypto"
-	ns "github.com/go-mclib/protocol/net_structures"
+	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
 )
 
 // SessionServerClient represents a session server client

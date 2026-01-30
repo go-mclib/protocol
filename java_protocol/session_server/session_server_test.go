@@ -3,8 +3,8 @@ package session_server_test
 import (
 	"testing"
 
-	ns "github.com/go-mclib/protocol/net_structures"
-	"github.com/go-mclib/protocol/session_server"
+	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
+	"github.com/go-mclib/protocol/java_protocol/session_server"
 )
 
 func TestComputeServerHash(t *testing.T) {

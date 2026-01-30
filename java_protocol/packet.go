@@ -21,8 +21,19 @@ import (
 	"compress/zlib"
 	"fmt"
 
-	ns "github.com/go-mclib/protocol/net_structures"
+	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
 )
+
+// PacketData is the interface that all packet data types must implement.
+// This replaces reflection-based serialization with explicit Read/Write methods.
+type PacketData interface {
+	// ID returns the packet ID for this packet type.
+	ID() ns.VarInt
+	// Read deserializes the packet data from the buffer.
+	Read(buf *ns.PacketBuffer) error
+	// Write serializes the packet data to the buffer.
+	Write(buf *ns.PacketBuffer) error
+}
 
 // State is the phase that the packet is in (handshake, status, login, configuration, play).
 // This is not sent over network (server and client automatically transition phases).
@@ -75,18 +86,34 @@ func NewPacket(state State, bound Bound, packetID ns.VarInt) *Packet {
 	}
 }
 
-// WithData marshals the provided packet data struct into bytes
-// and returns the original packet with the data bytes set.
-func (p *Packet) WithData(v any) (*Packet, error) {
+// WithPacketData serializes the PacketData using its Write method
+// and returns the packet with the data bytes set.
+func (p *Packet) WithPacketData(data PacketData) (*Packet, error) {
 	if p == nil {
 		return nil, fmt.Errorf("nil packet template")
 	}
-	dataBytes, err := PacketDataToBytes(v)
-	if err != nil {
-		return nil, err
+	buf := ns.NewWriter()
+	if err := data.Write(buf); err != nil {
+		return nil, fmt.Errorf("failed to write packet data: %w", err)
 	}
-	p.Data = dataBytes
+	p.Data = buf.Bytes()
 	return p, nil
+}
+
+// ReadPacketData deserializes the packet's raw data into a PacketData struct.
+func (p *Packet) ReadPacketData(data PacketData) error {
+	if p == nil {
+		return fmt.Errorf("nil packet")
+	}
+	buf := ns.NewReader(p.Data)
+	return data.Read(buf)
+}
+
+// FromPacketData creates a new Packet from a PacketData implementation.
+// It uses the packet's ID() method to set the packet ID.
+func FromPacketData(state State, bound Bound, data PacketData) (*Packet, error) {
+	packet := NewPacket(state, bound, data.ID())
+	return packet.WithPacketData(data)
 }
 
 // ToBytes marshals the packet into a byte array that can be sent over the network.

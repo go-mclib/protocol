@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	ns "github.com/go-mclib/protocol/net_structures"
+	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
 )
 
 type TCPClient struct {
@@ -236,4 +236,34 @@ func (c *TCPClient) readVarIntFromReader(reader *bytes.Reader) (ns.VarInt, error
 	}
 
 	return ns.VarInt(value), nil
+}
+
+// WritePacketData writes a PacketData implementation to the connection.
+// This is the preferred method for sending packets in new code.
+func (c *TCPClient) WritePacketData(data PacketData) error {
+	packet, err := FromPacketData(c.state, C2S, data)
+	if err != nil {
+		return fmt.Errorf("failed to create packet: %w", err)
+	}
+	return c.WritePacket(packet)
+}
+
+// ReadPacketInto reads a packet and deserializes it into the provided PacketData.
+// Returns the raw packet and any error that occurred.
+// This is the preferred method for reading packets in new code.
+func (c *TCPClient) ReadPacketInto(data PacketData) (*Packet, error) {
+	packet, err := c.ReadPacket()
+	if err != nil {
+		return nil, err
+	}
+
+	if packet.PacketID != data.ID() {
+		return packet, fmt.Errorf("packet ID mismatch: expected 0x%02X, got 0x%02X", data.ID(), packet.PacketID)
+	}
+
+	if err := packet.ReadPacketData(data); err != nil {
+		return packet, fmt.Errorf("failed to read packet data: %w", err)
+	}
+
+	return packet, nil
 }
