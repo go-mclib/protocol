@@ -44,7 +44,7 @@ func minecraftLoginWithXbox(ctx context.Context, httpClient *http.Client, userHa
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		data, _ := io.ReadAll(res.Body)
 		return nil, fmt.Errorf("minecraft login_with_xbox failed: %s: %s", res.Status, string(data))
@@ -77,7 +77,7 @@ func checkGameOwnership(ctx context.Context, httpClient *http.Client, mcAccessTo
 	if err != nil {
 		return false, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		data, _ := io.ReadAll(res.Body)
 		return false, fmt.Errorf("entitlements request failed: %s: %s", res.Status, string(data))
@@ -123,7 +123,7 @@ func fetchMinecraftProfile(ctx context.Context, httpClient *http.Client, mcAcces
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode == http.StatusNotFound {
 		return nil, nil
 	}

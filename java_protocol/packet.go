@@ -310,8 +310,8 @@ func (w *WirePacket) toBytesUncompressed() ([]byte, error) {
 func compressZlib(data []byte) []byte {
 	compressedData := bytes.NewBuffer(nil)
 	writer := zlib.NewWriter(compressedData)
-	writer.Write(data)
-	writer.Close()
+	_, _ = writer.Write(data)
+	_ = writer.Close()
 	return compressedData.Bytes()
 }
 
@@ -320,7 +320,7 @@ func decompressZlib(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	return io.ReadAll(reader)
 }

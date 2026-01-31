@@ -110,7 +110,7 @@ func TestBufferByteArrayMaxLen(t *testing.T) {
 	// create byte array with 10 bytes
 	data := make([]byte, 10)
 	buf := ns.NewWriter()
-	buf.WriteByteArray(data)
+	_ = buf.WriteByteArray(data)
 
 	// try to read with max 5 bytes - should fail
 	reader := ns.NewReader(buf.Bytes())
@@ -147,8 +147,8 @@ func TestBufferFixedByteArray(t *testing.T) {
 
 func TestBufferReset(t *testing.T) {
 	buf := ns.NewWriter()
-	buf.WriteByte(0x01)
-	buf.WriteByte(0x02)
+	_ = buf.WriteByte(0x01)
+	_ = buf.WriteByte(0x02)
 
 	if buf.Len() != 2 {
 		t.Errorf("Len() = %d, want 2", buf.Len())

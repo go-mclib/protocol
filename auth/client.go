@@ -285,7 +285,7 @@ func tryPort() int {
 	if err != nil {
 		return tryPort()
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	return randomPort
 }

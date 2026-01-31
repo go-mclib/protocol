@@ -57,7 +57,7 @@ func xblAuthenticate(ctx context.Context, httpClient *http.Client, msAccessToken
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		data, _ := io.ReadAll(res.Body)
 		return nil, fmt.Errorf("xbl authenticate failed: %s: %s", res.Status, string(data))
@@ -111,7 +111,7 @@ func xstsAuthorize(ctx context.Context, httpClient *http.Client, xblToken string
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		data, _ := io.ReadAll(res.Body)
 		return nil, fmt.Errorf("xsts authorize failed: %s: %s", res.Status, string(data))

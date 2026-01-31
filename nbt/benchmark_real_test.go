@@ -26,7 +26,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	realFixtureNBT, err = io.ReadAll(gr)
 	if err != nil {
@@ -75,7 +75,7 @@ func BenchmarkRealGzipDecode(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		gr.Close()
+		_ = gr.Close()
 
 		_, _, err = nbt.DecodeFile(data)
 		if err != nil {

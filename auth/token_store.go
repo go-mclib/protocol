@@ -83,7 +83,7 @@ func NewTokenStore(config TokenStoreConfig) (TokenStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("credentials path is not writable: %w", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	return &fileTokenStore{filePath: path}, nil
 }
