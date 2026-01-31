@@ -63,3 +63,37 @@ func UnpackPosition(val int64) Position {
 
 	return Position{X: x, Y: y, Z: z}
 }
+
+// GlobalPos represents a position in a specific dimension.
+// Used for things like death locations.
+//
+// Wire format:
+//
+//	┌─────────────────────────┬─────────────────────────┐
+//	│  Dimension (Identifier)  │  Position (Int64)       │
+//	└─────────────────────────┴─────────────────────────┘
+type GlobalPos struct {
+	Dimension Identifier
+	Pos       Position
+}
+
+// Encode writes the GlobalPos to w.
+func (g GlobalPos) Encode(w io.Writer) error {
+	if err := g.Dimension.Encode(w); err != nil {
+		return err
+	}
+	return g.Pos.Encode(w)
+}
+
+// DecodeGlobalPos reads a GlobalPos from r.
+func DecodeGlobalPos(r io.Reader) (GlobalPos, error) {
+	dim, err := DecodeIdentifier(r)
+	if err != nil {
+		return GlobalPos{}, err
+	}
+	pos, err := DecodePosition(r)
+	if err != nil {
+		return GlobalPos{}, err
+	}
+	return GlobalPos{Dimension: dim, Pos: pos}, nil
+}

@@ -316,6 +316,18 @@ func (pb *PacketBuffer) WritePosition(v Position) error {
 	return v.Encode(pb.writer)
 }
 
+// --- GlobalPos ---
+
+// ReadGlobalPos reads a global position (dimension + block position).
+func (pb *PacketBuffer) ReadGlobalPos() (GlobalPos, error) {
+	return DecodeGlobalPos(pb.reader)
+}
+
+// WriteGlobalPos writes a global position (dimension + block position).
+func (pb *PacketBuffer) WriteGlobalPos(v GlobalPos) error {
+	return v.Encode(pb.writer)
+}
+
 // --- UUID ---
 
 // ReadUUID reads a 128-bit UUID (two 64-bit integers).

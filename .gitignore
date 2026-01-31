@@ -1,7 +1,2 @@
 .env*
 .DS_Store
-
-*.log
-data
-*-decompiled/
-mclib-credentials.txt
