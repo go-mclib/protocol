@@ -234,7 +234,7 @@ if _, isEmpty := tag.(nbt.End); isEmpty {
 
 ### Text Component
 
-Text components are used for chat messages, item names, titles, and other formatted text. Since 1.20.3+, they are encoded as SNBT over the network.
+Text components are used for chat messages, item names, titles, and other formatted text. Since 1.20.3+, they are encoded as binary NBT over the network (not JSON or SNBT). Simple text-only components use NBT String tags, complex components use NBT Compound tags.
 
 ```go
 // simple text

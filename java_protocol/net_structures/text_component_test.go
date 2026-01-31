@@ -231,3 +231,53 @@ func TestTextComponent_RoundTrip(t *testing.T) {
 		t.Errorf("Round-trip encoding mismatch:\n  original:  %x\n  reencoded: %x", encoded, reencoded)
 	}
 }
+
+func TestTextComponent_StringTagOptimization(t *testing.T) {
+	// simple text should use NBT String tag (type 0x08)
+	simple := NewTextComponent("Hello")
+	buf := NewWriter()
+	if err := simple.Encode(buf); err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	simpleBytes := buf.Bytes()
+
+	// first byte should be NBT String tag type (0x08)
+	if simpleBytes[0] != 0x08 {
+		t.Errorf("Simple text should use String tag (0x08), got 0x%02x", simpleBytes[0])
+	}
+
+	// styled text should use NBT Compound tag (type 0x0a)
+	styled := TextComponent{Text: "Hello", Color: "red"}
+	buf2 := NewWriter()
+	if err := styled.Encode(buf2); err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	styledBytes := buf2.Bytes()
+
+	// first byte should be NBT Compound tag type (0x0a)
+	if styledBytes[0] != 0x0a {
+		t.Errorf("Styled text should use Compound tag (0x0a), got 0x%02x", styledBytes[0])
+	}
+
+	// simple encoding should be smaller
+	if len(simpleBytes) >= len(styledBytes) {
+		t.Errorf("Simple text (%d bytes) should be smaller than styled (%d bytes)",
+			len(simpleBytes), len(styledBytes))
+	}
+
+	// verify both decode correctly
+	var decoded1, decoded2 TextComponent
+	if err := decoded1.Decode(NewReader(simpleBytes)); err != nil {
+		t.Fatalf("Decode simple failed: %v", err)
+	}
+	if err := decoded2.Decode(NewReader(styledBytes)); err != nil {
+		t.Fatalf("Decode styled failed: %v", err)
+	}
+
+	if decoded1.Text != "Hello" {
+		t.Errorf("Simple decoded text mismatch: %q", decoded1.Text)
+	}
+	if decoded2.Text != "Hello" || decoded2.Color != "red" {
+		t.Errorf("Styled decoded mismatch: text=%q color=%q", decoded2.Text, decoded2.Color)
+	}
+}

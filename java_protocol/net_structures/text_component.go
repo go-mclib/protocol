@@ -74,9 +74,47 @@ func NewTranslateComponent(key string, args ...TextComponent) TextComponent {
 	return TextComponent{Translate: key, With: args}
 }
 
+// isSimpleText returns true if this component contains only plain text
+// with no styling, events, or children.
+func (tc *TextComponent) isSimpleText() bool {
+	return tc.Text != "" &&
+		tc.Translate == "" &&
+		tc.Keybind == "" &&
+		tc.Score == nil &&
+		tc.Selector == "" &&
+		tc.NBT == "" &&
+		tc.NBTBlock == "" &&
+		tc.NBTEntity == "" &&
+		tc.NBTStorage == "" &&
+		tc.Interpret == nil &&
+		len(tc.With) == 0 &&
+		tc.Color == "" &&
+		tc.Bold == nil &&
+		tc.Italic == nil &&
+		tc.Underlined == nil &&
+		tc.Strikethrough == nil &&
+		tc.Obfuscated == nil &&
+		tc.Font == "" &&
+		tc.Insertion == "" &&
+		tc.ClickEvent == nil &&
+		tc.HoverEvent == nil &&
+		len(tc.Extra) == 0
+}
+
 // Encode writes the text component as NBT to the writer.
+// Simple text-only components are encoded as NBT String tags for efficiency.
 func (tc *TextComponent) Encode(buf *PacketBuffer) error {
-	data, err := nbt.MarshalNetwork(tc)
+	var data []byte
+	var err error
+
+	if tc.isSimpleText() {
+		// encode as NBT String tag (more compact, less data sent over network)
+		data, err = nbt.Encode(nbt.String(tc.Text), "", true)
+	} else {
+		// encode as NBT Compound tag
+		data, err = nbt.MarshalNetwork(tc)
+	}
+
 	if err != nil {
 		return err
 	}
