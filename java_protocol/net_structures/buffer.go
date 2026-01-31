@@ -231,7 +231,7 @@ func (pb *PacketBuffer) WriteFloat64(v Float64) error {
 // --- String ---
 
 // ReadString reads a UTF-8 string with VarInt length prefix.
-// maxLen is the maximum allowed string length in characters (0 = no limit).
+// maxLen is the maximum allowed string length in characters (usually 32767, 0 means no limit).
 func (pb *PacketBuffer) ReadString(maxLen int) (String, error) {
 	return DecodeString(pb.reader, maxLen)
 }

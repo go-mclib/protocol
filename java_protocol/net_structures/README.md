@@ -54,6 +54,18 @@ Encoding: each byte uses bits 0-6 for data, bit 7 as continuation flag (1 = more
 | Angle | `Angle` | Rotation in 1/256 of a full turn (1 byte) |
 | Byte Array | `ByteArray` | VarInt length prefix + raw bytes |
 
+### Composite Types
+
+These types handle common patterns like length-prefixed arrays, boolean-prefixed optionals, and bit sets.
+
+| Protocol Type | Go Type | Wire Format |
+| ------------- | ------- | ----------- |
+| Prefixed Array | `PrefixedArray[T]` | VarInt length + elements |
+| Prefixed Optional | `PrefixedOptional[T]` | Boolean + value (if true) |
+| BitSet | `BitSet` | VarInt length (in longs) + int64 array |
+| Fixed BitSet | `FixedBitSet` | ceil(n/8) bytes (no length prefix) |
+| ID Set | `IDSet` | VarInt type + tag name or IDs |
+
 ## Usage
 
 ```go
@@ -82,6 +94,51 @@ buf := ns.NewReaderFrom(conn)
 packetID, _ := buf.ReadVarInt()
 ```
 
+### Composite Types Usage
+
+```go
+// PrefixedArray - VarInt length-prefixed array
+type MyPacket struct {
+    Names ns.PrefixedArray[ns.String]
+}
+
+func (p *MyPacket) Read(buf *ns.PacketBuffer) error {
+    return p.Names.DecodeWith(buf, func(b *ns.PacketBuffer) (ns.String, error) {
+        return b.ReadString(32767)
+    })
+}
+
+func (p *MyPacket) Write(buf *ns.PacketBuffer) error {
+    return p.Names.EncodeWith(buf, func(b *ns.PacketBuffer, v ns.String) error {
+        return b.WriteString(v)
+    })
+}
+
+// PrefixedOptional - Boolean-prefixed optional
+type MyPacket2 struct {
+    Title ns.PrefixedOptional[ns.String]
+}
+
+// create optionals
+title := ns.Some("Hello")       // present
+noTitle := ns.None[ns.String]() // absent
+
+// BitSet - dynamic bit set
+bits := ns.NewBitSet(128)
+bits.Set(5)
+bits.Get(5) // true
+bits.Encode(buf)
+
+// FixedBitSet - fixed-size bit set
+fixed := ns.NewFixedBitSet(20) // 20 bits = 3 bytes
+fixed.Set(0)
+fixed.Encode(buf)
+
+// IDSet - registry ID set
+tagSet := ns.NewTagIDSet("minecraft:climbable")
+inlineSet := ns.NewInlineIDSet([]ns.VarInt{1, 2, 3})
+```
+
 ## Not Yet Implemented
 
 These compound types are built on top of primitives and are not yet implemented:
@@ -90,7 +147,6 @@ These compound types are built on top of primitives and are not yet implemented:
 | ---- | ----------- |
 | Text Component | Chat/display text (JSON-based) |
 | Slot | Item stack with data components |
-| BitSet | Variable-length bit field |
 
 For NBT, we'll probably use `github.com/Tnze/go-mc/nbt` (already a dependency).
 
