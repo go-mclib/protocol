@@ -285,9 +285,9 @@ func TestKnownBytes(t *testing.T) {
 	// Network format: 0x0A (compound) + payload
 	// Payload: 0x01 (byte) + 0x00 0x04 "test" + 0x2A (42) + 0x00 (end)
 	knownBytes := []byte{
-		0x0A,             // TAG_Compound
-		0x01,             // TAG_Byte
-		0x00, 0x04,       // name length = 4
+		0x0A,       // TAG_Compound
+		0x01,       // TAG_Byte
+		0x00, 0x04, // name length = 4
 		't', 'e', 's', 't', // name = "test"
 		0x2A, // value = 42
 		0x00, // TAG_End

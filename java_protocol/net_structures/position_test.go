@@ -42,7 +42,7 @@ func TestPositionRoundTrip(t *testing.T) {
 		{X: 100, Y: 64, Z: -200},
 		{X: -100, Y: 64, Z: 200},
 		{X: -100, Y: -32, Z: -200},
-		{X: 33554431, Y: 2047, Z: 33554431},   // max positive
+		{X: 33554431, Y: 2047, Z: 33554431},    // max positive
 		{X: -33554432, Y: -2048, Z: -33554432}, // max negative
 		// Real-world coordinates
 		{X: 18357644, Y: 831, Z: -20882616},

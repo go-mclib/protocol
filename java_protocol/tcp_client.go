@@ -164,4 +164,3 @@ func resolveMinecraftAddress(address string) (string, error) {
 	// no SRV record found, use default port
 	return net.JoinHostPort(host, "25565"), nil
 }
-

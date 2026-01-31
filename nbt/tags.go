@@ -287,5 +287,5 @@ func (a LongArray) write(w *Writer) error {
 // This is typically not used directly.
 type End struct{}
 
-func (End) ID() byte          { return TagEnd }
+func (End) ID() byte              { return TagEnd }
 func (End) write(w *Writer) error { return nil }

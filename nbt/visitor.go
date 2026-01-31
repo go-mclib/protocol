@@ -59,16 +59,16 @@ type Visitor interface {
 // Embed this in custom visitors to only override specific methods.
 type BaseVisitor struct{}
 
-func (BaseVisitor) VisitByte(int8) error             { return nil }
-func (BaseVisitor) VisitShort(int16) error           { return nil }
-func (BaseVisitor) VisitInt(int32) error             { return nil }
-func (BaseVisitor) VisitLong(int64) error            { return nil }
-func (BaseVisitor) VisitFloat(float32) error         { return nil }
-func (BaseVisitor) VisitDouble(float64) error        { return nil }
-func (BaseVisitor) VisitByteArray([]byte) error      { return nil }
-func (BaseVisitor) VisitString(string) error         { return nil }
-func (BaseVisitor) VisitIntArray([]int32) error      { return nil }
-func (BaseVisitor) VisitLongArray([]int64) error     { return nil }
+func (BaseVisitor) VisitByte(int8) error         { return nil }
+func (BaseVisitor) VisitShort(int16) error       { return nil }
+func (BaseVisitor) VisitInt(int32) error         { return nil }
+func (BaseVisitor) VisitLong(int64) error        { return nil }
+func (BaseVisitor) VisitFloat(float32) error     { return nil }
+func (BaseVisitor) VisitDouble(float64) error    { return nil }
+func (BaseVisitor) VisitByteArray([]byte) error  { return nil }
+func (BaseVisitor) VisitString(string) error     { return nil }
+func (BaseVisitor) VisitIntArray([]int32) error  { return nil }
+func (BaseVisitor) VisitLongArray([]int64) error { return nil }
 func (BaseVisitor) VisitListStart(byte, int) (Visitor, error) {
 	return nil, nil // Skip by default
 }

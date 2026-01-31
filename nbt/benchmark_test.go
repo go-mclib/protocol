@@ -48,12 +48,12 @@ func makeComplexCompound() nbt.Compound {
 			Elements:    items,
 		},
 		"abilities": nbt.Compound{
-			"flying":      nbt.Byte(0),
-			"mayfly":      nbt.Byte(0),
-			"instabuild":  nbt.Byte(0),
+			"flying":       nbt.Byte(0),
+			"mayfly":       nbt.Byte(0),
+			"instabuild":   nbt.Byte(0),
 			"invulnerable": nbt.Byte(0),
-			"walkSpeed":   nbt.Float(0.1),
-			"flySpeed":    nbt.Float(0.05),
+			"walkSpeed":    nbt.Float(0.1),
+			"flySpeed":     nbt.Float(0.05),
 		},
 	}
 }
@@ -104,7 +104,6 @@ type ComplexPlayer struct {
 
 func BenchmarkEncodeSimple(b *testing.B) {
 	compound := makeSimpleCompound()
-	
 
 	for b.Loop() {
 		_, err := nbt.EncodeNetwork(compound)
@@ -116,7 +115,6 @@ func BenchmarkEncodeSimple(b *testing.B) {
 
 func BenchmarkEncodeComplex(b *testing.B) {
 	compound := makeComplexCompound()
-	
 
 	for b.Loop() {
 		_, err := nbt.EncodeNetwork(compound)
@@ -128,7 +126,6 @@ func BenchmarkEncodeComplex(b *testing.B) {
 
 func BenchmarkEncodeFile(b *testing.B) {
 	compound := makeComplexCompound()
-	
 
 	for b.Loop() {
 		_, err := nbt.EncodeFile(compound, "Player")
@@ -143,7 +140,6 @@ func BenchmarkEncodeFile(b *testing.B) {
 func BenchmarkDecodeSimple(b *testing.B) {
 	compound := makeSimpleCompound()
 	data, _ := nbt.EncodeNetwork(compound)
-	
 
 	for b.Loop() {
 		_, err := nbt.DecodeNetwork(data)
@@ -156,7 +152,6 @@ func BenchmarkDecodeSimple(b *testing.B) {
 func BenchmarkDecodeComplex(b *testing.B) {
 	compound := makeComplexCompound()
 	data, _ := nbt.EncodeNetwork(compound)
-	
 
 	for b.Loop() {
 		_, err := nbt.DecodeNetwork(data)
@@ -169,7 +164,6 @@ func BenchmarkDecodeComplex(b *testing.B) {
 func BenchmarkDecodeFile(b *testing.B) {
 	compound := makeComplexCompound()
 	data, _ := nbt.EncodeFile(compound, "Player")
-	
 
 	for b.Loop() {
 		_, _, err := nbt.DecodeFile(data)
@@ -189,7 +183,6 @@ func BenchmarkMarshalSimple(b *testing.B) {
 		Z:     -200.5,
 		Level: 42,
 	}
-	
 
 	for b.Loop() {
 		_, err := nbt.Marshal(player)
@@ -226,7 +219,6 @@ func BenchmarkMarshalComplex(b *testing.B) {
 			FlySpeed:  0.05,
 		},
 	}
-	
 
 	for b.Loop() {
 		_, err := nbt.Marshal(player)
@@ -247,7 +239,6 @@ func BenchmarkUnmarshalSimple(b *testing.B) {
 		Level: 42,
 	}
 	data, _ := nbt.Marshal(player)
-	
 
 	for b.Loop() {
 		var p SimplePlayer
@@ -285,7 +276,6 @@ func BenchmarkUnmarshalComplex(b *testing.B) {
 		},
 	}
 	data, _ := nbt.Marshal(player)
-	
 
 	for b.Loop() {
 		var p ComplexPlayer
@@ -305,7 +295,6 @@ func BenchmarkRoundTripSimple(b *testing.B) {
 		Z:     -200.5,
 		Level: 42,
 	}
-	
 
 	for b.Loop() {
 		data, err := nbt.Marshal(player)
@@ -346,7 +335,6 @@ func BenchmarkRoundTripComplex(b *testing.B) {
 			FlySpeed:  0.05,
 		},
 	}
-	
 
 	for b.Loop() {
 		data, err := nbt.Marshal(player)
@@ -365,7 +353,6 @@ func BenchmarkRoundTripComplex(b *testing.B) {
 func BenchmarkEncodeAllocations(b *testing.B) {
 	compound := makeComplexCompound()
 	b.ReportAllocs()
-	
 
 	for b.Loop() {
 		_, _ = nbt.EncodeNetwork(compound)
@@ -376,7 +363,6 @@ func BenchmarkDecodeAllocations(b *testing.B) {
 	compound := makeComplexCompound()
 	data, _ := nbt.EncodeNetwork(compound)
 	b.ReportAllocs()
-	
 
 	for b.Loop() {
 		_, _ = nbt.DecodeNetwork(data)
@@ -390,14 +376,13 @@ func BenchmarkMarshalAllocations(b *testing.B) {
 	}
 
 	player := ComplexPlayer{
-		Name:       "Steve",
-		X:          100.5,
-		Y:          64.0,
-		Z:          -200.5,
-		Inventory:  items,
+		Name:      "Steve",
+		X:         100.5,
+		Y:         64.0,
+		Z:         -200.5,
+		Inventory: items,
 	}
 	b.ReportAllocs()
-	
 
 	for b.Loop() {
 		_, _ = nbt.Marshal(player)
@@ -411,15 +396,14 @@ func BenchmarkUnmarshalAllocations(b *testing.B) {
 	}
 
 	player := ComplexPlayer{
-		Name:       "Steve",
-		X:          100.5,
-		Y:          64.0,
-		Z:          -200.5,
-		Inventory:  items,
+		Name:      "Steve",
+		X:         100.5,
+		Y:         64.0,
+		Z:         -200.5,
+		Inventory: items,
 	}
 	data, _ := nbt.Marshal(player)
 	b.ReportAllocs()
-	
 
 	for b.Loop() {
 		var p ComplexPlayer

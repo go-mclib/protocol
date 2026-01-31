@@ -60,8 +60,8 @@ func TestAngleRadians(t *testing.T) {
 		expected float64
 	}{
 		{0, 0},
-		{64, math.Pi / 2},     // 90°
-		{128, math.Pi},        // 180°
+		{64, math.Pi / 2},      // 90°
+		{128, math.Pi},         // 180°
 		{192, 3 * math.Pi / 2}, // 270°
 	}
 
