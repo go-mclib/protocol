@@ -80,13 +80,13 @@ func TestVarIntRoundTrip(t *testing.T) {
 
 	for _, v := range values {
 		t.Run("", func(t *testing.T) {
-			// Encode
+			// encode
 			buf := ns.NewWriter()
 			if err := buf.WriteVarInt(v); err != nil {
 				t.Fatalf("WriteVarInt() error = %v", err)
 			}
 
-			// Decode
+			// decode
 			reader := ns.NewReader(buf.Bytes())
 			got, err := reader.ReadVarInt()
 			if err != nil {

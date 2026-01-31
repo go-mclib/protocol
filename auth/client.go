@@ -26,8 +26,6 @@ type AuthClientConfig struct {
 	HTTPClient       *http.Client
 	TokenStore       TokenStore
 	TokenStoreConfig TokenStoreConfig
-	// Username is the Minecraft username to use for caching.
-	// If empty, username from login response will be used.
 	Username string
 }
 
@@ -108,7 +106,7 @@ func (c *AuthClient) AuthorizeWithLocalServer(ctx context.Context) (string, erro
 	defer func() { _ = stopLocalServer(srv) }()
 
 	if err := openBrowser(authURL); err != nil {
-		// Note: opening the browser can fail in headless environments; still allow manual navigation.
+		// note: opening the browser can fail in headless environments; still allow manual navigation.
 		// return the URL in the error for convenience.
 		return "", fmt.Errorf("failed to open browser, navigate to: %s, err: %w", authURL, err)
 	}
@@ -183,7 +181,7 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 		return LoginData{}, errors.New("minecraft profile not found for account")
 	}
 
-	// Calculate expiry time from expires_in (seconds)
+	// calculate expiry time from expires_in (seconds)
 	expiresAt := time.Now().Add(time.Duration(mcAuth.ExpiresIn) * time.Second)
 
 	return LoginData{
@@ -206,16 +204,16 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 	store := c.tokenStore
 
-	// Try cached session if username is specified
+	// try cached session if username is specified
 	if store != nil && c.username != "" {
 		if session, err := store.LoadSession(c.username); err == nil && session != nil {
-			// Check if session is still valid (access token not expired)
+			// check if session is still valid (access token not expired)
 			if session.IsValid() {
 				c.username = session.Username
 				return FromSession(session), nil
 			}
 
-			// Session expired but we have a refresh token - try to refresh
+			// session expired but we have a refresh token - try to refresh
 			if session.RefreshToken != "" {
 				if data, err := c.LoginWithRefreshToken(ctx, session.RefreshToken); err == nil {
 					c.username = data.Username
@@ -226,7 +224,7 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 		}
 	}
 
-	// No cache or cache failed; must reauthenticate
+	// no cache or cache failed; must reauthenticate
 	rt, err := c.AuthorizeWithLocalServer(ctx)
 	if err != nil {
 		return LoginData{}, err
@@ -237,7 +235,7 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 		return LoginData{}, err
 	}
 
-	// Save session with the username from login response
+	// save session with the username from login response
 	c.username = data.Username
 	if store != nil {
 		_ = store.SaveSession(data.ToSession())

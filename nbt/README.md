@@ -78,16 +78,18 @@ type Player struct {
     Debug bool    `nbt:"debug,omitempty"` // omit if false
 }
 
-// marshal to NBT (network format)
 player := Player{Name: "Steve", X: 100, Y: 64, Z: -200}
-data, err := nbt.Marshal(player)
 
-// marshal to file format
-data, err := nbt.MarshalFile(player, "Player")
+// file format (for .dat files, chunks, etc.)
+data, err := nbt.Marshal(player)              // empty root name
+data, err := nbt.MarshalFile(player, "Player") // custom root name
 
-// unmarshal from NBT
-var player Player
-err := nbt.Unmarshal(data, &player)
+var p Player
+err := nbt.Unmarshal(data, &p)
+
+// network format (for protocol packets)
+data, err := nbt.MarshalNetwork(player)
+err := nbt.UnmarshalNetwork(data, &p)
 ```
 
 ### Type Mapping

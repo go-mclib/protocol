@@ -14,15 +14,13 @@
 //	    Items []Item  `nbt:"items"`
 //	}
 //
-//	// Marshal to NBT
+//	// Marshal/Unmarshal use file format (for .dat files, chunks, etc.)
 //	data, err := nbt.Marshal(player)
-//
-//	// Unmarshal from NBT
-//	var player Player
 //	err := nbt.Unmarshal(data, &player)
 //
-// For network transmission, use MarshalNetwork/UnmarshalNetwork which omit
-// the root tag name.
+//	// MarshalNetwork/UnmarshalNetwork use network format (for protocol packets)
+//	data, err := nbt.MarshalNetwork(player)
+//	err := nbt.UnmarshalNetwork(data, &player)
 package nbt
 
 // Tag type IDs as defined by the NBT specification.

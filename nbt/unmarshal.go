@@ -6,11 +6,20 @@ import (
 	"strings"
 )
 
-// Unmarshal decodes NBT bytes in network format into a Go value.
+// Unmarshal decodes NBT bytes in file format into a Go value.
 //
 // The target must be a pointer to a struct, map, or other supported type.
 // See Marshal for the type mapping.
+//
+// For network protocol packets, use UnmarshalNetwork instead.
 func Unmarshal(data []byte, v any) error {
+	return UnmarshalOptions(data, v, false)
+}
+
+// UnmarshalNetwork decodes NBT bytes in network format (nameless root) into a Go value.
+//
+// This is the format used in Minecraft protocol packets.
+func UnmarshalNetwork(data []byte, v any) error {
 	return UnmarshalOptions(data, v, true)
 }
 

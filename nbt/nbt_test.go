@@ -31,7 +31,7 @@ func TestEncodeDecodePrimitives(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name+" network", func(t *testing.T) {
-			// Wrap in compound for valid NBT
+			// wrap in compound for valid NBT
 			compound := nbt.Compound{"value": tt.tag}
 
 			data, err := nbt.EncodeNetwork(compound)
@@ -49,7 +49,7 @@ func TestEncodeDecodePrimitives(t *testing.T) {
 				t.Fatalf("expected Compound, got %T", decoded)
 			}
 
-			// Compare string representation
+			// compare string representation
 			got := c["value"]
 			if got.ID() != tt.tag.ID() {
 				t.Errorf("tag type = %d, want %d", got.ID(), tt.tag.ID())
@@ -199,9 +199,9 @@ func TestMarshalOmitEmpty(t *testing.T) {
 
 	c := Config{Name: "test"}
 
-	data, err := nbt.Marshal(c)
+	data, err := nbt.MarshalNetwork(c)
 	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
+		t.Fatalf("MarshalNetwork() error = %v", err)
 	}
 
 	tag, err := nbt.DecodeNetwork(data)
@@ -225,19 +225,19 @@ func TestMarshalOmitEmpty(t *testing.T) {
 func TestNetworkVsFileFormat(t *testing.T) {
 	compound := nbt.Compound{"test": nbt.Int(42)}
 
-	// Network format: tag type (1) + payload
+	// network format: tag type (1) + payload
 	networkData, _ := nbt.EncodeNetwork(compound)
 
-	// File format: tag type (1) + name length (2) + name + payload
+	// file format: tag type (1) + name length (2) + name + payload
 	fileData, _ := nbt.EncodeFile(compound, "root")
 
-	// File format should be longer (has name field)
+	// file format should be longer (has name field)
 	if len(fileData) <= len(networkData) {
 		t.Errorf("file format (%d bytes) should be longer than network format (%d bytes)",
 			len(fileData), len(networkData))
 	}
 
-	// Both should start with TagCompound (0x0A)
+	// both should start with TagCompound (0x0A)
 	if networkData[0] != nbt.TagCompound {
 		t.Errorf("network format first byte = 0x%02X, want 0x%02X", networkData[0], nbt.TagCompound)
 	}
@@ -255,9 +255,9 @@ func TestNetworkVsFileFormat(t *testing.T) {
 }
 
 func TestDepthLimit(t *testing.T) {
-	// Create deeply nested structure
+	// create deeply nested structure
 	var compound nbt.Tag = nbt.Compound{"end": nbt.Byte(1)}
-	for i := 0; i < 600; i++ {
+	for range 600 {
 		compound = nbt.Compound{"nested": compound}
 	}
 
@@ -266,13 +266,13 @@ func TestDepthLimit(t *testing.T) {
 		t.Fatalf("Encode() error = %v", err)
 	}
 
-	// Should fail with default depth limit (512)
+	// should fail with default depth limit (512)
 	_, err = nbt.DecodeNetwork(data)
 	if err == nil {
 		t.Error("DecodeNetwork() should fail with depth > 512")
 	}
 
-	// Should succeed with higher limit
+	// should succeed with higher limit
 	_, err = nbt.DecodeNetwork(data, nbt.WithMaxDepth(700))
 	if err != nil {
 		t.Errorf("DecodeNetwork() with higher limit error = %v", err)
@@ -280,10 +280,10 @@ func TestDepthLimit(t *testing.T) {
 }
 
 func TestKnownBytes(t *testing.T) {
-	// Test against known NBT bytes
-	// This is a simple compound with one byte value
-	// Network format: 0x0A (compound) + payload
-	// Payload: 0x01 (byte) + 0x00 0x04 "test" + 0x2A (42) + 0x00 (end)
+	// test against known NBT bytes
+	// this is a simple compound with one byte value
+	// network format: 0x0A (compound) + payload
+	// payload: 0x01 (byte) + 0x00 0x04 "test" + 0x2A (42) + 0x00 (end)
 	knownBytes := []byte{
 		0x0A,       // TAG_Compound
 		0x01,       // TAG_Byte

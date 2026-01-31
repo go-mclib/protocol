@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Marshal converts a Go value to NBT bytes in network format.
+// Marshal converts a Go value to NBT bytes in file format (with empty root name).
 //
 // The following Go types map to NBT types:
 //   - bool         → Byte (0 or 1)
@@ -26,7 +26,17 @@ import (
 //
 // Struct fields can be tagged with `nbt:"name"` to specify the NBT key name.
 // Use `nbt:"-"` to skip a field. Use `nbt:"name,omitempty"` to omit zero values.
+//
+// For network protocol packets, use MarshalNetwork instead.
 func Marshal(v any) ([]byte, error) {
+	return MarshalOptions(v, "", false)
+}
+
+// MarshalNetwork converts a Go value to NBT bytes in network format (nameless root).
+//
+// This is the format used in Minecraft protocol packets. The root compound tag
+// has no name, saving 2 bytes compared to file format.
+func MarshalNetwork(v any) ([]byte, error) {
 	return MarshalOptions(v, "", true)
 }
 
@@ -50,12 +60,12 @@ func MarshalTag(v any) (Tag, error) {
 }
 
 func marshalValue(v reflect.Value) (Tag, error) {
-	// Handle nil
+	// handle nil
 	if !v.IsValid() {
 		return Compound{}, nil
 	}
 
-	// Dereference pointers
+	// dereference pointers
 	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			return Compound{}, nil
@@ -63,7 +73,7 @@ func marshalValue(v reflect.Value) (Tag, error) {
 		v = v.Elem()
 	}
 
-	// Check if it implements Tag interface
+	// check if it implements Tag interface
 	if tag, ok := v.Interface().(Tag); ok {
 		return tag, nil
 	}
@@ -157,7 +167,7 @@ func marshalSlice(v reflect.Value) (Tag, error) {
 		return data, nil
 	}
 
-	// Generic slice → List
+	// generic slice → List
 	if v.Len() == 0 {
 		return List{ElementType: TagEnd, Elements: nil}, nil
 	}
@@ -211,12 +221,12 @@ func marshalStruct(v reflect.Value) (Tag, error) {
 		field := t.Field(i)
 		fieldValue := v.Field(i)
 
-		// Skip unexported fields
+		// skip unexported fields
 		if !field.IsExported() {
 			continue
 		}
 
-		// Parse tag
+		// parse tag
 		name, opts := parseTag(field.Tag.Get("nbt"))
 		if name == "-" {
 			continue
@@ -225,7 +235,7 @@ func marshalStruct(v reflect.Value) (Tag, error) {
 			name = field.Name
 		}
 
-		// Handle omitempty
+		// handle omitempty
 		if opts.Contains("omitempty") && isEmptyValue(fieldValue) {
 			continue
 		}
@@ -282,7 +292,7 @@ func isEmptyValue(v reflect.Value) bool {
 		return v.Uint() == 0
 	case reflect.Float32, reflect.Float64:
 		return v.Float() == 0
-	case reflect.Interface, reflect.Ptr:
+	case reflect.Interface, reflect.Pointer:
 		return v.IsNil()
 	}
 	return false

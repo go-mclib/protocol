@@ -127,7 +127,7 @@ func (s *fileTokenStore) Clear(username string) error {
 
 	delete(sessions, username)
 
-	// If no accounts remain, remove the file
+	// if no accounts remain, remove the file
 	if len(sessions) == 0 {
 		return os.Remove(s.filePath)
 	}
@@ -164,7 +164,7 @@ func (s *fileTokenStore) loadSessions() (map[string]*CachedSession, error) {
 
 	var sessions map[string]*CachedSession
 	if err := json.Unmarshal(data, &sessions); err != nil {
-		// Try to migrate from old format (map[string]string with just refresh tokens)
+		// try to migrate from old format (map[string]string with just refresh tokens)
 		var oldTokens map[string]string
 		if jsonErr := json.Unmarshal(data, &oldTokens); jsonErr == nil {
 			sessions = make(map[string]*CachedSession)

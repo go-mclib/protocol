@@ -139,16 +139,103 @@ tagSet := ns.NewTagIDSet("minecraft:climbable")
 inlineSet := ns.NewInlineIDSet([]ns.VarInt{1, 2, 3})
 ```
 
-## Not Yet Implemented
+### NBT (Named Binary Tag)
 
-These compound types are built on top of primitives and are not yet implemented:
+NBT is used for complex structured data in packets. The `nbt` package supports both file format (with root name) and **network format** (nameless root) used in packets. For communication with the server, use the network format.
 
-| Type | Description |
-| ---- | ----------- |
-| Text Component | Chat/display text (JSON-based) |
-| Slot | Item stack with data components |
+#### Direct decoding
 
-For NBT, we'll probably use `github.com/Tnze/go-mc/nbt` (already a dependency).
+```go
+import "github.com/go-mclib/protocol/nbt"
+
+type EntityData struct {
+    Name     string `nbt:"Name"`
+    Position int64  `nbt:"Position"`
+    OnGround bool   `nbt:"OnGround"`
+}
+
+type S2CSomePacket struct {
+    EntityID   ns.VarInt
+    Data       EntityData
+    ExtraField ns.VarInt
+}
+
+func (p *S2CSomePacket) Read(buf *ns.PacketBuffer) error {
+    var err error
+    if p.EntityID, err = buf.ReadVarInt(); err != nil {
+        return err
+    }
+
+    // use nbt.NewReaderFrom to read the NBT data, which stops at TAG_End
+    nbtReader := nbt.NewReaderFrom(buf.Reader())
+    tag, _, err := nbtReader.ReadTag(true) // true = network format
+    if err != nil {
+        return err
+    }
+    if err := nbt.UnmarshalTag(tag, &p.Data); err != nil {
+        return err
+    }
+    p.ExtraField, err = buf.ReadVarInt()
+    return err
+}
+
+func (p *S2CSomePacket) Write(buf *ns.PacketBuffer) error {
+    if err := buf.WriteVarInt(p.EntityID); err != nil {
+        return err
+    }
+    nbtData, err := nbt.MarshalNetwork(p.Data)
+    if err != nil {
+        return err
+    }
+    if _, err := buf.Write(nbtData); err != nil {
+        return err
+    }
+    return buf.WriteVarInt(p.ExtraField)
+}
+```
+
+#### Storing as `nbt.Tag` (lazy processing)
+
+For packets where you want to defer NBT processing (maybe the NBT data is too large, or dynamic):
+
+```go
+type S2CSomePacket struct {
+    EntityID ns.VarInt
+    Data     nbt.Tag   // store as generic Tag
+}
+
+func (p *S2CSomePacket) Read(buf *ns.PacketBuffer) error {
+    var err error
+    if p.EntityID, err = buf.ReadVarInt(); err != nil {
+        return err
+    }
+    nbtReader := nbt.NewReaderFrom(buf.Reader())
+    p.Data, _, err = nbtReader.ReadTag(true)
+    return err
+}
+
+// later, convert to struct to grab values when needed
+var entityData EntityData
+err := nbt.UnmarshalTag(packet.Data, &entityData)
+```
+
+#### Empty/Optional NBT
+
+Some packets use a single `TAG_End` byte (`0x00`) to indicate empty or absent NBT data. Check for `nbt.End{}` type after reading:
+
+```go
+tag, _, err := nbtReader.ReadTag(true)
+if _, isEmpty := tag.(nbt.End); isEmpty {
+    // no NBT data present
+}
+```
+
+### Other Types (Not Yet Implemented)
+
+| Protocol Type | Go Type | Notes |
+| ------------- | ------- | ----- |
+| Text Component | - | JSON-based chat/display text |
+| Slot | - | Item stack with data components |
 
 ## References
 
