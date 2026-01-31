@@ -26,7 +26,7 @@ type AuthClientConfig struct {
 	HTTPClient       *http.Client
 	TokenStore       TokenStore
 	TokenStoreConfig TokenStoreConfig
-	Username string
+	Username         string
 }
 
 // LoginData is the data returned from a login

@@ -215,6 +215,8 @@ func (p *S2CSomePacket) Read(buf *ns.PacketBuffer) error {
 }
 
 // later, convert to struct to grab values when needed
+// extra fields in the NBT data that are not present in
+// the EntityData struct will be skipped
 var entityData EntityData
 err := nbt.UnmarshalTag(packet.Data, &entityData)
 ```
@@ -230,12 +232,105 @@ if _, isEmpty := tag.(nbt.End); isEmpty {
 }
 ```
 
-### Other Types (Not Yet Implemented)
+### Text Component
 
-| Protocol Type | Go Type | Notes |
-| ------------- | ------- | ----- |
-| Text Component | - | JSON-based chat/display text |
-| Slot | - | Item stack with data components |
+Text components are used for chat messages, item names, titles, and other formatted text. Since 1.20.3+, they are encoded as SNBT over the network.
+
+```go
+// simple text
+tc := ns.NewTextComponent("Hello, World!")
+
+// with style
+bold := true
+tc := ns.TextComponent{
+    Text:  "Styled text",
+    Color: "red",
+    Bold:  &bold,
+}
+
+// translatable
+tc := ns.NewTranslateComponent("chat.type.text",
+    ns.NewTextComponent("Player"),
+    ns.NewTextComponent("Hello"),
+)
+
+// with children
+tc := ns.TextComponent{
+    Text: "Hello, ",
+    Extra: []ns.TextComponent{
+        {Text: "World", Color: "gold"},
+        {Text: "!"},
+    },
+}
+
+// read/write
+buf.WriteTextComponent(tc)
+tc, _ := buf.ReadTextComponent()
+```
+
+### Slot (Item Stack)
+
+Slots represent item stacks with data components. Used in inventory packets, container interactions, etc.
+
+Wire format:
+
+- `VarInt count` - item count (0 = empty slot)
+- `VarInt item_id` - registry ID (only if count > 0)
+- `VarInt add_count` - components to add
+- `VarInt remove_count` - components to remove
+- Component data (+96 different components, we will implement them incrementally as needed, probably separating it into a separate package at that point)...
+
+```go
+// empty slot
+slot := ns.EmptySlot()
+
+// basic item
+slot := ns.NewSlot(1, 64) // stone, 64 count
+
+// with components
+slot := ns.NewSlot(100, 1)
+slot.AddComponent(&ns.DamageComponent{Damage: 50})
+slot.AddComponent(&ns.CustomNameComponent{
+    Name: ns.TextComponent{Text: "Epic Sword", Color: "gold"},
+})
+slot.AddComponent(&ns.EnchantmentsComponent{
+    Enchantments:  map[ns.VarInt]ns.VarInt{1: 5}, // sharpness 5
+    ShowInTooltip: true,
+})
+
+// remove default components
+slot.RemoveComponent(ns.ComponentDamage)
+
+// read/write
+buf.WriteSlot(slot)
+slot, _ := buf.ReadSlot()
+
+// get components
+if dmg := slot.GetComponent(ns.ComponentDamage); dmg != nil {
+    damage := dmg.(*ns.DamageComponent).Damage
+}
+```
+
+#### Implemented Components
+
+| ID | Constant | Type | Description |
+|----|----------|------|-------------|
+| 0 | `ComponentCustomData` | `CustomDataComponent` | Arbitrary NBT data |
+| 1 | `ComponentMaxStackSize` | `MaxStackSizeComponent` | Max stack size override |
+| 2 | `ComponentMaxDamage` | `MaxDamageComponent` | Max durability |
+| 3 | `ComponentDamage` | `DamageComponent` | Current damage |
+| 4 | `ComponentUnbreakable` | `UnbreakableComponent` | Unbreakable flag |
+| 7 | `ComponentCustomName` | `CustomNameComponent` | Custom display name |
+| 8 | `ComponentItemName` | `ItemNameComponent` | Item name override |
+| 10 | `ComponentLore` | `LoreComponent` | Lore lines |
+| 11 | `ComponentRarity` | `RarityComponent` | Item rarity |
+| 12 | `ComponentEnchantments` | `EnchantmentsComponent` | Enchantments |
+| 17 | `ComponentRepairCost` | `RepairCostComponent` | Anvil repair cost |
+| 26 | `ComponentDyedColor` | `DyedColorComponent` | Leather armor color |
+
+Unknown component types are stored as `RawComponent` for passthrough.
+
+> ###### TODO: separate the slot components into a separate package, and maybe text component too
 
 ## References
 
