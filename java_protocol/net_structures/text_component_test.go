@@ -1,8 +1,10 @@
-package net_structures
+package net_structures_test
 
 import (
 	"bytes"
 	"testing"
+
+	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
 )
 
 // TextComponent wire format: NBT tag (network format, no root name)
@@ -12,40 +14,39 @@ import (
 // Reference: https://minecraft.wiki/w/Java_Edition_protocol/Data_types#Text_Component
 
 var textComponentTestCases = []struct {
-	name     string
-	raw      []byte
-	expected TextComponent
+	name string
+	raw  []byte
+	text string
 }{
 	{
 		name: "simple text",
-		// NBT String: 0x08 (type) + 0x00 0x05 (length=5) + "Hello"
-		raw:      []byte{0x08, 0x00, 0x05, 'H', 'e', 'l', 'l', 'o'},
-		expected: TextComponent{Text: "Hello"},
+		raw:  []byte{0x08, 0x00, 0x05, 'H', 'e', 'l', 'l', 'o'},
+		text: "Hello",
 	},
 	{
 		name: "world",
-		// NBT String: 0x08 (type) + 0x00 0x05 (length=5) + "World"
-		raw:      []byte{0x08, 0x00, 0x05, 'W', 'o', 'r', 'l', 'd'},
-		expected: TextComponent{Text: "World"},
+		raw:  []byte{0x08, 0x00, 0x05, 'W', 'o', 'r', 'l', 'd'},
+		text: "World",
 	},
 }
 
 func TestTextComponent(t *testing.T) {
 	for _, tc := range textComponentTestCases {
 		t.Run(tc.name+" decode", func(t *testing.T) {
-			var got TextComponent
-			buf := NewReader(tc.raw)
+			var got ns.TextComponent
+			buf := ns.NewReader(tc.raw)
 			if err := got.Decode(buf); err != nil {
 				t.Fatalf("decode error: %v", err)
 			}
-			if got.Text != tc.expected.Text {
-				t.Errorf("Text mismatch: got %q, want %q", got.Text, tc.expected.Text)
+			if got.Text != tc.text {
+				t.Errorf("Text mismatch: got %q, want %q", got.Text, tc.text)
 			}
 		})
 
 		t.Run(tc.name+" encode", func(t *testing.T) {
-			buf := NewWriter()
-			if err := tc.expected.Encode(buf); err != nil {
+			comp := ns.TextComponent{Text: tc.text}
+			buf := ns.NewWriter()
+			if err := comp.Encode(buf); err != nil {
 				t.Fatalf("encode error: %v", err)
 			}
 			if !bytes.Equal(buf.Bytes(), tc.raw) {
@@ -55,14 +56,12 @@ func TestTextComponent(t *testing.T) {
 	}
 }
 
-// TestTextComponent_Complex tests styled/complex components via round-trip
-// since exact NBT encoding can vary in field order
 func TestTextComponent_Complex(t *testing.T) {
-	cases := []TextComponent{
+	cases := []ns.TextComponent{
 		{Text: "Styled", Color: "red"},
-		{Text: "Hello, ", Extra: []TextComponent{{Text: "World", Color: "gold"}}},
-		{Translate: "chat.type.text", With: []TextComponent{{Text: "Player"}, {Text: "Hello"}}},
-		{Text: "Click me", ClickEvent: &ClickEvent{Action: "open_url", Value: "https://minecraft.net"}},
+		{Text: "Hello, ", Extra: []ns.TextComponent{{Text: "World", Color: "gold"}}},
+		{Translate: "chat.type.text", With: []ns.TextComponent{{Text: "Player"}, {Text: "Hello"}}},
+		{Text: "Click me", ClickEvent: &ns.ClickEvent{Action: "open_url", Value: "https://minecraft.net"}},
 	}
 
 	for _, tc := range cases {
@@ -71,19 +70,16 @@ func TestTextComponent_Complex(t *testing.T) {
 			name = tc.Translate
 		}
 		t.Run(name, func(t *testing.T) {
-			// encode
-			buf := NewWriter()
+			buf := ns.NewWriter()
 			if err := tc.Encode(buf); err != nil {
 				t.Fatalf("encode error: %v", err)
 			}
 
-			// decode
-			var decoded TextComponent
-			if err := decoded.Decode(NewReader(buf.Bytes())); err != nil {
+			var decoded ns.TextComponent
+			if err := decoded.Decode(ns.NewReader(buf.Bytes())); err != nil {
 				t.Fatalf("decode error: %v", err)
 			}
 
-			// verify key fields
 			if decoded.Text != tc.Text {
 				t.Errorf("Text mismatch: got %q, want %q", decoded.Text, tc.Text)
 			}
@@ -101,7 +97,7 @@ func TestTextComponent_Complex(t *testing.T) {
 			}
 
 			// re-encode should match
-			buf2 := NewWriter()
+			buf2 := ns.NewWriter()
 			if err := decoded.Encode(buf2); err != nil {
 				t.Fatalf("re-encode error: %v", err)
 			}
@@ -113,14 +109,13 @@ func TestTextComponent_Complex(t *testing.T) {
 }
 
 func TestTextComponent_StringOptimization(t *testing.T) {
-	// simple text should use NBT String (0x08), styled should use Compound (0x0a)
-	simple := NewTextComponent("Hello")
-	styled := TextComponent{Text: "Hello", Color: "red"}
+	simple := ns.NewTextComponent("Hello")
+	styled := ns.TextComponent{Text: "Hello", Color: "red"}
 
-	simpleBuf := NewWriter()
+	simpleBuf := ns.NewWriter()
 	simple.Encode(simpleBuf)
 
-	styledBuf := NewWriter()
+	styledBuf := ns.NewWriter()
 	styled.Encode(styledBuf)
 
 	if simpleBuf.Bytes()[0] != 0x08 {

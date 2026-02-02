@@ -61,8 +61,8 @@ func (v *LpVec3) Decode(buf *PacketBuffer) error {
 	// y: 15 bits from be32 bits 15-29
 	// z: 15 bits from be32 bits 0-14
 	scale := int(le16 & 0x7)
-	xLow := (le16 >> 3) & 0x1FFF  // 13 bits
-	xHigh := (be32 >> 30) & 0x3   // 2 bits
+	xLow := (le16 >> 3) & 0x1FFF // 13 bits
+	xHigh := (be32 >> 30) & 0x3  // 2 bits
 	x := int16((xHigh << 13) | uint32(xLow))
 	y := int16((be32 >> 15) & 0x7FFF)
 	z := int16(be32 & 0x7FFF)

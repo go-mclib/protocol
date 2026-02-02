@@ -189,13 +189,6 @@ func NewBitSet(capacity int) *BitSet {
 	return &BitSet{data: make([]int64, numLongs)}
 }
 
-// BitSetFromLongs creates a BitSet from raw long values.
-func BitSetFromLongs(longs []int64) *BitSet {
-	data := make([]int64, len(longs))
-	copy(data, longs)
-	return &BitSet{data: data}
-}
-
 // Decode reads a BitSet from the buffer.
 func (b *BitSet) Decode(buf *PacketBuffer) error {
 	length, err := buf.ReadVarInt()
@@ -579,4 +572,3 @@ func (x IDOrX[T]) Get() (id VarInt, value T, isInline bool) {
 	}
 	return x.ID, x.Value, false
 }
-

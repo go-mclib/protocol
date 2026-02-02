@@ -1,13 +1,15 @@
-package net_structures
+package net_structures_test
 
 import (
 	"bytes"
 	"testing"
+
+	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
 )
 
 // testSlotDecoder decodes known simple component types for testing.
-func testSlotDecoder(buf *PacketBuffer, id VarInt) ([]byte, error) {
-	w := NewWriter()
+func testSlotDecoder(buf *ns.PacketBuffer, id ns.VarInt) ([]byte, error) {
+	w := ns.NewWriter()
 	switch id {
 	case 1: // max stack size - VarInt
 		v, err := buf.ReadVarInt()
@@ -42,118 +44,99 @@ func testSlotDecoder(buf *PacketBuffer, id VarInt) ([]byte, error) {
 //   [removeCount × VarInt componentID]
 
 var slotTestCases = []struct {
-	name     string
-	raw      []byte
-	expected Slot
+	name   string
+	raw    []byte
+	count  ns.VarInt
+	itemID ns.VarInt
+	add    []ns.RawSlotComponent
+	remove []ns.VarInt
 }{
 	{
-		name:     "empty slot",
-		raw:      []byte{0x00},
-		expected: Slot{Count: 0},
+		name:  "empty slot",
+		raw:   []byte{0x00},
+		count: 0,
 	},
 	{
-		name: "stone x64 no components",
-		// count=64 (0x40), itemID=1 (0x01), add=0, remove=0
-		raw:      []byte{0x40, 0x01, 0x00, 0x00},
-		expected: Slot{Count: 64, ItemID: 1},
+		name:   "stone x64 no components",
+		raw:    []byte{0x40, 0x01, 0x00, 0x00},
+		count:  64,
+		itemID: 1,
 	},
 	{
-		name: "diamond x1 no components",
-		// count=1, itemID=264 (0x88 0x02), add=0, remove=0
-		raw:      []byte{0x01, 0x88, 0x02, 0x00, 0x00},
-		expected: Slot{Count: 1, ItemID: 264},
+		name:   "diamond x1 no components",
+		raw:    []byte{0x01, 0x88, 0x02, 0x00, 0x00},
+		count:  1,
+		itemID: 264,
 	},
 	{
-		name: "item with one removed component",
-		// count=1, itemID=1, add=0, remove=1, removeID=3 (damage)
-		raw: []byte{0x01, 0x01, 0x00, 0x01, 0x03},
-		expected: Slot{
-			Count:  1,
-			ItemID: 1,
-			Components: SlotComponents{
-				Remove: []VarInt{3},
-			},
-		},
+		name:   "item with one removed component",
+		raw:    []byte{0x01, 0x01, 0x00, 0x01, 0x03},
+		count:  1,
+		itemID: 1,
+		remove: []ns.VarInt{3},
 	},
 	{
-		name: "item with two removed components",
-		// count=1, itemID=1, add=0, remove=2, removeIDs=3,12
-		raw: []byte{0x01, 0x01, 0x00, 0x02, 0x03, 0x0c},
-		expected: Slot{
-			Count:  1,
-			ItemID: 1,
-			Components: SlotComponents{
-				Remove: []VarInt{3, 12},
-			},
-		},
+		name:   "item with two removed components",
+		raw:    []byte{0x01, 0x01, 0x00, 0x02, 0x03, 0x0c},
+		count:  1,
+		itemID: 1,
+		remove: []ns.VarInt{3, 12},
 	},
 	{
-		name: "item with damage component",
-		// count=1, itemID=100 (0x64), add=1, remove=0
-		// component: id=3, data=VarInt(50)=0x32
-		raw: []byte{0x01, 0x64, 0x01, 0x00, 0x03, 0x32},
-		expected: Slot{
-			Count:  1,
-			ItemID: 100,
-			Components: SlotComponents{
-				Add: []RawSlotComponent{
-					{ID: 3, Data: []byte{0x32}},
-				},
-			},
-		},
+		name:   "item with damage component",
+		raw:    []byte{0x01, 0x64, 0x01, 0x00, 0x03, 0x32},
+		count:  1,
+		itemID: 100,
+		add:    []ns.RawSlotComponent{{ID: 3, Data: []byte{0x32}}},
 	},
 	{
-		name: "item with max stack size component",
-		// count=16, itemID=50 (0x32), add=1, remove=0
-		// component: id=1, data=VarInt(16)=0x10
-		raw: []byte{0x10, 0x32, 0x01, 0x00, 0x01, 0x10},
-		expected: Slot{
-			Count:  16,
-			ItemID: 50,
-			Components: SlotComponents{
-				Add: []RawSlotComponent{
-					{ID: 1, Data: []byte{0x10}},
-				},
-			},
-		},
+		name:   "item with max stack size component",
+		raw:    []byte{0x10, 0x32, 0x01, 0x00, 0x01, 0x10},
+		count:  16,
+		itemID: 50,
+		add:    []ns.RawSlotComponent{{ID: 1, Data: []byte{0x10}}},
 	},
 	{
-		name: "item with multiple components",
-		// count=1, itemID=100, add=2, remove=1
-		// comp1: id=3 (damage), data=VarInt(25)=0x19
-		// comp2: id=1 (max stack), data=VarInt(1)=0x01
-		// remove: id=4
-		raw: []byte{0x01, 0x64, 0x02, 0x01, 0x03, 0x19, 0x01, 0x01, 0x04},
-		expected: Slot{
-			Count:  1,
-			ItemID: 100,
-			Components: SlotComponents{
-				Add: []RawSlotComponent{
-					{ID: 3, Data: []byte{0x19}},
-					{ID: 1, Data: []byte{0x01}},
-				},
-				Remove: []VarInt{4},
-			},
-		},
+		name:   "item with multiple components",
+		raw:    []byte{0x01, 0x64, 0x02, 0x01, 0x03, 0x19, 0x01, 0x01, 0x04},
+		count:  1,
+		itemID: 100,
+		add:    []ns.RawSlotComponent{{ID: 3, Data: []byte{0x19}}, {ID: 1, Data: []byte{0x01}}},
+		remove: []ns.VarInt{4},
 	},
 }
 
 func TestSlot(t *testing.T) {
 	for _, tc := range slotTestCases {
 		t.Run(tc.name+" decode", func(t *testing.T) {
-			buf := NewReader(tc.raw)
+			buf := ns.NewReader(tc.raw)
 			got, err := buf.ReadSlot(testSlotDecoder)
 			if err != nil {
 				t.Fatalf("decode error: %v", err)
 			}
-			if !slotEqual(got, tc.expected) {
-				t.Errorf("decode mismatch:\n  got:  %+v\n  want: %+v", got, tc.expected)
+			if got.Count != tc.count || got.ItemID != tc.itemID {
+				t.Errorf("basic mismatch: got count=%d itemID=%d, want count=%d itemID=%d",
+					got.Count, got.ItemID, tc.count, tc.itemID)
+			}
+			if !slotComponentsEqual(got.Components.Add, tc.add) {
+				t.Errorf("Add components mismatch")
+			}
+			if !slotRemoveEqual(got.Components.Remove, tc.remove) {
+				t.Errorf("Remove components mismatch")
 			}
 		})
 
 		t.Run(tc.name+" encode", func(t *testing.T) {
-			buf := NewWriter()
-			if err := tc.expected.Encode(buf); err != nil {
+			slot := ns.Slot{
+				Count:  tc.count,
+				ItemID: tc.itemID,
+				Components: ns.SlotComponents{
+					Add:    tc.add,
+					Remove: tc.remove,
+				},
+			}
+			buf := ns.NewWriter()
+			if err := slot.Encode(buf); err != nil {
 				t.Fatalf("encode error: %v", err)
 			}
 			if !bytes.Equal(buf.Bytes(), tc.raw) {
@@ -163,26 +146,24 @@ func TestSlot(t *testing.T) {
 	}
 }
 
-func slotEqual(a, b Slot) bool {
-	if a.Count != b.Count || a.ItemID != b.ItemID {
+func slotComponentsEqual(a, b []ns.RawSlotComponent) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	if len(a.Components.Add) != len(b.Components.Add) {
-		return false
-	}
-	for i := range a.Components.Add {
-		if a.Components.Add[i].ID != b.Components.Add[i].ID {
-			return false
-		}
-		if !bytes.Equal(a.Components.Add[i].Data, b.Components.Add[i].Data) {
+	for i := range a {
+		if a[i].ID != b[i].ID || !bytes.Equal(a[i].Data, b[i].Data) {
 			return false
 		}
 	}
-	if len(a.Components.Remove) != len(b.Components.Remove) {
+	return true
+}
+
+func slotRemoveEqual(a, b []ns.VarInt) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for i := range a.Components.Remove {
-		if a.Components.Remove[i] != b.Components.Remove[i] {
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}
@@ -190,7 +171,7 @@ func slotEqual(a, b Slot) bool {
 }
 
 func TestSlot_GetComponent(t *testing.T) {
-	slot := NewSlot(100, 1)
+	slot := ns.NewSlot(100, 1)
 	slot.AddComponent(3, []byte{0x32})
 	slot.AddComponent(5, []byte{0x01, 0x02})
 

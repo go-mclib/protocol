@@ -10,12 +10,12 @@ import (
 // UUID wire format: 16 bytes (128-bit, big-endian)
 
 var uuidTestCases = []struct {
-	name   string
-	raw    []byte
-	str    string
-	value  ns.UUID
-	msb    int64
-	lsb    int64
+	name  string
+	raw   []byte
+	str   string
+	value ns.UUID
+	msb   int64
+	lsb   int64
 }{
 	{
 		name:  "nil",
@@ -97,9 +97,9 @@ func TestUUID(t *testing.T) {
 
 func TestUUID_ParseErrors(t *testing.T) {
 	invalid := []string{
-		"550e8400",                               // too short
-		"550e8400-e29b-41d4-a716-44665544000g",   // invalid hex
-		"550e8400-e29b-41d4-a716-4466554400000",  // too long
+		"550e8400",                              // too short
+		"550e8400-e29b-41d4-a716-44665544000g",  // invalid hex
+		"550e8400-e29b-41d4-a716-4466554400000", // too long
 	}
 	for _, s := range invalid {
 		if _, err := ns.UUIDFromString(s); err == nil {
