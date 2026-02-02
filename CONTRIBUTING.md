@@ -37,7 +37,7 @@ For packet mappings, see [go-mclib/data](https://github.com/go-mclib/data).
 ## Code Style
 
 - Comments should be minimal and only document non-obvious parts
-- Comments (except docstrings) should start with lowercase
+- Comments (except docstrings or exported symbol names) should start with lowercase
 - References to the [Minecraft Wiki](https://minecraft.wiki/w/Java_Edition_protocol) are appreciated where applicable
 
 ## Testing
