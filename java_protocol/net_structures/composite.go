@@ -22,9 +22,9 @@ type ElementDecoder[T any] func(buf *PacketBuffer) (T, error)
 //
 // Wire format:
 //
-//	┌─────────────────┬─────────────────────────────────────┐
-//	│  Length (VarInt)│  Elements (T × Length)              │
-//	└─────────────────┴─────────────────────────────────────┘
+//	┌───────────────────────┬───────────────────────────────┐
+//	│  Length (VarInt)      │  Elements (T × Length)        │
+//	└───────────────────────┴───────────────────────────────┘
 //
 // Example usage:
 //
@@ -32,12 +32,12 @@ type ElementDecoder[T any] func(buf *PacketBuffer) (T, error)
 //	    Names PrefixedArray[String]
 //	}
 //
-//	// In Read:
+//	// in Read:
 //	p.Names.DecodeWith(buf, func(b *PacketBuffer) (String, error) {
 //	    return b.ReadString(32767)
 //	})
 //
-//	// In Write:
+//	// in Write:
 //	p.Names.EncodeWith(buf, func(b *PacketBuffer, v String) error {
 //	    return b.WriteString(v)
 //	})
@@ -428,3 +428,155 @@ func (s *IDSet) Encode(buf *PacketBuffer) error {
 	}
 	return nil
 }
+
+// -----------------------------------------------------------------------------
+// X or Y (Boolean-Selected Variant)
+// -----------------------------------------------------------------------------
+
+// XOrY represents a boolean-selected variant between two types.
+// When IsX is true, the X value is encoded; otherwise, Y is encoded.
+//
+// Wire format:
+//
+//	┌──────────────────┬─────────────────────────────────────┐
+//	│  IsX (Boolean)   │  X or Y (depending on IsX)          │
+//	└──────────────────┴─────────────────────────────────────┘
+//
+// This pattern is relatively rare and is typically handled inline in packet
+// definitions since both X and Y types must be known at compile time.
+type XOrY[X, Y any] struct {
+	IsX bool
+	X   X
+	Y   Y
+}
+
+// NewX creates an XOrY with an X value.
+func NewX[X, Y any](value X) XOrY[X, Y] {
+	return XOrY[X, Y]{IsX: true, X: value}
+}
+
+// NewY creates an XOrY with a Y value.
+func NewY[X, Y any](value Y) XOrY[X, Y] {
+	return XOrY[X, Y]{IsX: false, Y: value}
+}
+
+// DecodeWith reads an XOrY using the provided decoders.
+func (v *XOrY[X, Y]) DecodeWith(buf *PacketBuffer, decodeX ElementDecoder[X], decodeY ElementDecoder[Y]) error {
+	isX, err := buf.ReadBool()
+	if err != nil {
+		return fmt.Errorf("failed to read x-or-y selector: %w", err)
+	}
+	v.IsX = bool(isX)
+
+	if v.IsX {
+		v.X, err = decodeX(buf)
+		if err != nil {
+			return fmt.Errorf("failed to read x-or-y x value: %w", err)
+		}
+	} else {
+		v.Y, err = decodeY(buf)
+		if err != nil {
+			return fmt.Errorf("failed to read x-or-y y value: %w", err)
+		}
+	}
+	return nil
+}
+
+// EncodeWith writes an XOrY using the provided encoders.
+func (v XOrY[X, Y]) EncodeWith(buf *PacketBuffer, encodeX ElementEncoder[X], encodeY ElementEncoder[Y]) error {
+	if err := buf.WriteBool(Boolean(v.IsX)); err != nil {
+		return fmt.Errorf("failed to write x-or-y selector: %w", err)
+	}
+	if v.IsX {
+		if err := encodeX(buf, v.X); err != nil {
+			return fmt.Errorf("failed to write x-or-y x value: %w", err)
+		}
+	} else {
+		if err := encodeY(buf, v.Y); err != nil {
+			return fmt.Errorf("failed to write x-or-y y value: %w", err)
+		}
+	}
+	return nil
+}
+
+// Get returns either the X value (if IsX) or Y value, along with the selector.
+func (v XOrY[X, Y]) Get() (x X, y Y, isX bool) {
+	return v.X, v.Y, v.IsX
+}
+
+// IDOrX represents a registry ID or an inline value.
+// Used when a field can reference a registry entry by ID or define a value inline.
+//
+// Wire format:
+//
+//	┌─────────────────┬─────────────────────────────────────┐
+//	│  ID (VarInt)    │  Value (X, only if ID = 0)          │
+//	└─────────────────┴─────────────────────────────────────┘
+//
+// If ID = 0, the inline value follows.
+// If ID > 0, it represents registry ID + 1 (actual ID is ID - 1).
+type IDOrX[T any] struct {
+	// IsInline indicates whether this contains an inline value (true) or a registry ID (false).
+	IsInline bool
+	// ID is the registry ID (only valid if IsInline is false).
+	// Note: wire format uses ID+1, but this field stores the actual ID.
+	ID VarInt
+	// Value is the inline value (only valid if IsInline is true).
+	Value T
+}
+
+// NewIDRef creates an IDOrX that references a registry entry.
+func NewIDRef[T any](id VarInt) IDOrX[T] {
+	return IDOrX[T]{IsInline: false, ID: id}
+}
+
+// NewInlineValue creates an IDOrX with an inline value.
+func NewInlineValue[T any](value T) IDOrX[T] {
+	return IDOrX[T]{IsInline: true, Value: value}
+}
+
+// DecodeWith reads an IDOrX using the provided decoder for inline values.
+func (x *IDOrX[T]) DecodeWith(buf *PacketBuffer, decode ElementDecoder[T]) error {
+	id, err := buf.ReadVarInt()
+	if err != nil {
+		return fmt.Errorf("failed to read id-or-x id: %w", err)
+	}
+
+	if id == 0 {
+		x.IsInline = true
+		x.Value, err = decode(buf)
+		if err != nil {
+			return fmt.Errorf("failed to read id-or-x inline value: %w", err)
+		}
+	} else {
+		x.IsInline = false
+		x.ID = id - 1 // wire format is ID+1
+	}
+	return nil
+}
+
+// EncodeWith writes an IDOrX using the provided encoder for inline values.
+func (x IDOrX[T]) EncodeWith(buf *PacketBuffer, encode ElementEncoder[T]) error {
+	if x.IsInline {
+		if err := buf.WriteVarInt(0); err != nil {
+			return fmt.Errorf("failed to write id-or-x id: %w", err)
+		}
+		if err := encode(buf, x.Value); err != nil {
+			return fmt.Errorf("failed to write id-or-x inline value: %w", err)
+		}
+	} else {
+		if err := buf.WriteVarInt(x.ID + 1); err != nil {
+			return fmt.Errorf("failed to write id-or-x id: %w", err)
+		}
+	}
+	return nil
+}
+
+// Get returns the ID (if reference) or -1 (if inline), and the inline value if present.
+func (x IDOrX[T]) Get() (id VarInt, value T, isInline bool) {
+	if x.IsInline {
+		return -1, x.Value, true
+	}
+	return x.ID, x.Value, false
+}
+

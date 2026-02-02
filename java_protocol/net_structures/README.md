@@ -314,7 +314,7 @@ if dmg := slot.GetComponent(ns.ComponentDamage); dmg != nil {
 #### Implemented Components
 
 | ID | Constant | Type | Description |
-|----|----------|------|-------------|
+| -- | -------- | ---- | ----------- |
 | 0 | `ComponentCustomData` | `CustomDataComponent` | Arbitrary NBT data |
 | 1 | `ComponentMaxStackSize` | `MaxStackSizeComponent` | Max stack size override |
 | 2 | `ComponentMaxDamage` | `MaxDamageComponent` | Max durability |
@@ -329,8 +329,6 @@ if dmg := slot.GetComponent(ns.ComponentDamage); dmg != nil {
 | 26 | `ComponentDyedColor` | `DyedColorComponent` | Leather armor color |
 
 Unknown component types are stored as `RawComponent` for passthrough.
-
-> ###### TODO: separate the slot components into a separate package, and maybe text component too
 
 ## References
 
