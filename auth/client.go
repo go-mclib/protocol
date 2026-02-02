@@ -103,7 +103,7 @@ func (c *AuthClient) AuthorizeWithLocalServer(ctx context.Context) (string, erro
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = stopLocalServer(srv) }()
+	defer stopLocalServer(srv)
 
 	if err := openBrowser(authURL); err != nil {
 		// note: opening the browser can fail in headless environments; still allow manual navigation.
@@ -285,7 +285,7 @@ func tryPort() int {
 	if err != nil {
 		return tryPort()
 	}
-	defer func() { _ = listener.Close() }()
+	defer listener.Close()
 
 	return randomPort
 }

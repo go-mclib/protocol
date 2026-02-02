@@ -26,7 +26,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	defer func() { _ = gr.Close() }()
+	defer gr.Close()
 
 	realFixtureNBT, err = io.ReadAll(gr)
 	if err != nil {

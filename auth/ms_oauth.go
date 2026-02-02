@@ -103,7 +103,7 @@ func exchangeAuthCodeForTokens(ctx context.Context, httpClient *http.Client, cli
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		data, _ := io.ReadAll(res.Body)
 		return nil, fmt.Errorf("token exchange failed: %s: %s", res.Status, string(data))
@@ -137,7 +137,7 @@ func refreshAccessToken(ctx context.Context, httpClient *http.Client, clientID, 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		data, _ := io.ReadAll(res.Body)
 		return nil, fmt.Errorf("refresh token request failed: %s: %s", res.Status, string(data))

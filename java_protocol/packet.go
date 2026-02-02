@@ -320,7 +320,7 @@ func decompressZlib(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = reader.Close() }()
+	defer reader.Close()
 
 	return io.ReadAll(reader)
 }

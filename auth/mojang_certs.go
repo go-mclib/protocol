@@ -48,7 +48,7 @@ func FetchMojangCertificate(accessToken string) (*MojangCertificateData, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch certificate: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("certificate request failed with status %d", resp.StatusCode)

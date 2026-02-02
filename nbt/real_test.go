@@ -50,7 +50,7 @@ func TestRealDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gzip.NewReader() error = %v", err)
 	}
-	defer func() { _ = gr.Close() }()
+	defer gr.Close()
 
 	// decode
 	data, err := io.ReadAll(gr)
@@ -78,7 +78,7 @@ func TestRealEncode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gzip.NewReader() error = %v", err)
 	}
-	defer func() { _ = gr.Close() }()
+	defer gr.Close()
 	fixtureNBT, err := io.ReadAll(gr)
 	if err != nil {
 		t.Fatalf("io.ReadAll() error = %v", err)
