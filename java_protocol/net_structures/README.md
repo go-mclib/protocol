@@ -53,6 +53,7 @@ Encoding: each byte uses bits 0-6 for data, bit 7 as continuation flag (1 = more
 | UUID | `UUID` | 128-bit, stored as `[16]byte` |
 | Angle | `Angle` | Rotation in 1/256 of a full turn (1 byte) |
 | Byte Array | `ByteArray` | VarInt length prefix + raw bytes |
+| LpVec3 | `LpVec3` | Low-precision 3D vector for entity velocity |
 
 ### Composite Types
 
@@ -65,6 +66,8 @@ These types handle common patterns like length-prefixed arrays, boolean-prefixed
 | BitSet | `BitSet` | VarInt length (in longs) + int64 array |
 | Fixed BitSet | `FixedBitSet` | ceil(n/8) bytes (no length prefix) |
 | ID Set | `IDSet` | VarInt type + tag name or IDs |
+| X or Y | `XOrY[X, Y]` | Boolean selector + X or Y value |
+| ID or X | `IDOrX[T]` | VarInt ID (0 = inline value follows) |
 
 ## Usage
 
@@ -137,6 +140,122 @@ fixed.Encode(buf)
 // IDSet - registry ID set
 tagSet := ns.NewTagIDSet("minecraft:climbable")
 inlineSet := ns.NewInlineIDSet([]ns.VarInt{1, 2, 3})
+```
+
+### XOrY - Boolean-Selected Variant
+
+`XOrY[X, Y]` represents a value that can be one of two types, selected by a boolean.
+
+```go
+// wire format: Boolean (isX) + X or Y value
+type MyPacket struct {
+    // either an inline value or a registry reference
+    Data ns.XOrY[InlineData, ns.VarInt]
+}
+
+// create variants
+xVal := ns.NewX[InlineData, ns.VarInt](myData) // isX = true
+yVal := ns.NewY[InlineData, ns.VarInt](42)     // isX = false
+
+// decode
+var v ns.XOrY[InlineData, ns.VarInt]
+v.DecodeWith(buf,
+    func(b *ns.PacketBuffer) (InlineData, error) { return decodeInline(b) },
+    func(b *ns.PacketBuffer) (ns.VarInt, error) { return b.ReadVarInt() },
+)
+
+// check which variant
+x, y, isX := v.Get()
+if isX {
+    // use x
+} else {
+    // use y
+}
+```
+
+### IDOrX - Registry ID or Inline Value
+
+`IDOrX[T]` represents either a registry ID reference or an inline value.
+
+```go
+// wire format: VarInt (0 = inline follows, >0 = ID + 1)
+type MyPacket struct {
+    Effect ns.IDOrX[EffectData]
+}
+
+// create variants
+byID := ns.NewIDRef[EffectData](5)           // references registry ID 5
+inline := ns.NewInlineValue(EffectData{...}) // inline value
+
+// decode
+var v ns.IDOrX[EffectData]
+v.DecodeWith(buf, func(b *ns.PacketBuffer) (EffectData, error) {
+    return decodeEffect(b)
+})
+
+// check which variant
+id, value, isInline := v.Get()
+if isInline {
+    // use value
+} else {
+    // look up id in registry
+}
+```
+
+### LpVec3 - Low-Precision Vector
+
+`LpVec3` encodes 3 float64 values in typically 6 bytes using 15-bit scaled values. Used for entity velocity.
+
+```go
+// write
+vel := ns.LpVec3{X: 0.5, Y: -0.1, Z: 0.0}
+buf.WriteLpVec3(vel)
+
+// read
+vel, _ := buf.ReadLpVec3()
+fmt.Printf("velocity: %.4f, %.4f, %.4f\n", vel.X, vel.Y, vel.Z)
+```
+
+Wire format:
+- If all components are essentially zero (< 3.05e-5), sends single `0x00` byte
+- Otherwise: 6 bytes encoding scale (3 bits) + X/Y/Z (15 bits each)
+
+### GameProfile
+
+`GameProfile` represents a player's profile with UUID, username, and properties.
+
+```go
+// read
+profile, _ := buf.ReadGameProfile()
+fmt.Printf("player: %s (%s)\n", profile.Username, profile.UUID)
+
+// write
+profile := ns.GameProfile{
+    UUID:     playerUUID,
+    Username: "Steve",
+}
+buf.WriteGameProfile(profile)
+
+// with properties (e.g., textures)
+profile.Properties = ns.PrefixedArray[ns.ProfileProperty]{
+    {
+        Name:  "textures",
+        Value: base64TextureData,
+        Signature: ns.Some(signatureData),
+    },
+}
+```
+
+`ResolvableProfile` is a variant that can be partial (for lookups) or complete:
+
+```go
+// partial profile (for server-side resolution)
+partial := ns.NewPartialProfile()
+partial.PartialUsername = ns.Some("Steve")
+
+// complete profile
+complete := ns.NewCompleteProfile(gameProfile)
+complete.BodyModel = ns.Some(ns.Identifier("minecraft:slim"))
 ```
 
 ### NBT (Named Binary Tag)
@@ -270,7 +389,7 @@ tc, _ := buf.ReadTextComponent()
 
 ### Slot (Item Stack)
 
-Slots represent item stacks with data components. Used in inventory packets, container interactions, etc.
+Slots represent item stacks with data components. This package stores components as raw bytes - callers should use a higher-level package to parse specific component types.
 
 Wire format:
 
@@ -278,59 +397,103 @@ Wire format:
 - `VarInt item_id` - registry ID (only if count > 0)
 - `VarInt add_count` - components to add
 - `VarInt remove_count` - components to remove
-- Component data (+96 different components, we will implement them incrementally as needed, probably separating it into a separate package at that point)...
+- Components: each is `VarInt id` + component-specific data
 
 ```go
 // empty slot
 slot := ns.EmptySlot()
 
 // basic item
-slot := ns.NewSlot(1, 64) // stone, 64 count
+slot := ns.NewSlot(1, 64) // item ID 1, 64 count
 
-// with components
-slot := ns.NewSlot(100, 1)
-slot.AddComponent(&ns.DamageComponent{Damage: 50})
-slot.AddComponent(&ns.CustomNameComponent{
-    Name: ns.TextComponent{Text: "Epic Sword", Color: "gold"},
+// add raw component data
+slot.AddComponent(3, []byte{0x32}) // component ID 3 with data
+
+// remove a component type
+slot.RemoveComponent(4)
+
+// reading requires a decoder that knows component sizes
+slot, err := buf.ReadSlot(func(buf *ns.PacketBuffer, id ns.VarInt) ([]byte, error) {
+    // decode component based on ID, return raw bytes
+    switch id {
+    case 3: // damage component
+        v, err := buf.ReadVarInt()
+        if err != nil {
+            return nil, err
+        }
+        return encodeVarInt(v), nil
+    default:
+        return nil, fmt.Errorf("unknown component: %d", id)
+    }
 })
-slot.AddComponent(&ns.EnchantmentsComponent{
-    Enchantments:  map[ns.VarInt]ns.VarInt{1: 5}, // sharpness 5
-    ShowInTooltip: true,
-})
 
-// remove default components
-slot.RemoveComponent(ns.ComponentDamage)
-
-// read/write
+// writing
 buf.WriteSlot(slot)
-slot, _ := buf.ReadSlot()
 
-// get components
-if dmg := slot.GetComponent(ns.ComponentDamage); dmg != nil {
-    damage := dmg.(*ns.DamageComponent).Damage
+// get raw component by ID
+if comp := slot.GetComponent(3); comp != nil {
+    // comp.ID, comp.Data
 }
 ```
 
-#### Implemented Components
+### Chunk Data
 
-| ID | Constant | Type | Description |
-| -- | -------- | ---- | ----------- |
-| 0 | `ComponentCustomData` | `CustomDataComponent` | Arbitrary NBT data |
-| 1 | `ComponentMaxStackSize` | `MaxStackSizeComponent` | Max stack size override |
-| 2 | `ComponentMaxDamage` | `MaxDamageComponent` | Max durability |
-| 3 | `ComponentDamage` | `DamageComponent` | Current damage |
-| 4 | `ComponentUnbreakable` | `UnbreakableComponent` | Unbreakable flag |
-| 7 | `ComponentCustomName` | `CustomNameComponent` | Custom display name |
-| 8 | `ComponentItemName` | `ItemNameComponent` | Item name override |
-| 10 | `ComponentLore` | `LoreComponent` | Lore lines |
-| 11 | `ComponentRarity` | `RarityComponent` | Item rarity |
-| 12 | `ComponentEnchantments` | `EnchantmentsComponent` | Enchantments |
-| 17 | `ComponentRepairCost` | `RepairCostComponent` | Anvil repair cost |
-| 26 | `ComponentDyedColor` | `DyedColorComponent` | Leather armor color |
+`ChunkData` represents chunk section data and block entities. Heightmaps are stored as raw NBT, chunk sections as raw bytes. Parsing block data requires knowledge of the current registry.
 
-Unknown component types are stored as `RawComponent` for passthrough.
+```go
+// read chunk data
+chunkData, err := buf.ReadChunkData()
+
+// heightmaps as NBT compound
+fmt.Printf("heightmaps: %v\n", chunkData.Heightmaps)
+
+// raw chunk section data (needs registry to parse)
+fmt.Printf("data size: %d bytes\n", len(chunkData.Data))
+
+// block entities
+for _, be := range chunkData.BlockEntities {
+    x, z := be.X(), be.Z() // relative coords 0-15
+    y := be.Y             // absolute Y
+    typeID := be.Type     // block entity type registry ID
+    data := be.Data       // NBT data
+}
+
+// write
+buf.WriteChunkData(chunkData)
+```
+
+### Light Data
+
+`LightData` represents lighting information for a chunk, including sky and block light.
+
+```go
+// read light data
+lightData, err := buf.ReadLightData()
+
+// check which sections have light data
+if lightData.SkyLightMask.Get(5) {
+    // section 5 has sky light data
+}
+
+// light arrays are 2048 bytes each (4096 nibbles for 16x16x16 blocks)
+for i, arr := range lightData.SkyLightArrays {
+    // each byte contains 2 light values (4 bits each)
+}
+
+// write
+buf.WriteLightData(lightData)
+```
+
+Wire format:
+- `SkyLightMask` - BitSet indicating sections with sky light
+- `BlockLightMask` - BitSet indicating sections with block light
+- `EmptySkyLightMask` - BitSet indicating sections with all-zero sky light
+- `EmptyBlockLightMask` - BitSet indicating sections with all-zero block light
+- `SkyLightArrays` - VarInt count + 2048-byte arrays
+- `BlockLightArrays` - VarInt count + 2048-byte arrays
 
 ## References
 
 - [Minecraft Wiki - Data Types](https://minecraft.wiki/w/Java_Edition_protocol/Data_types)
 - [Minecraft Wiki - Protocol](https://minecraft.wiki/w/Java_Edition_protocol)
+- [Minecraft Wiki - Chunk Format](https://minecraft.wiki/w/Chunk_format)

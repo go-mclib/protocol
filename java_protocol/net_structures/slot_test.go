@@ -3,9 +3,36 @@ package net_structures
 import (
 	"bytes"
 	"testing"
-
-	"github.com/go-mclib/protocol/nbt"
 )
+
+// testSlotDecoder is a simple decoder for testing that handles a few known component types.
+func testSlotDecoder(buf *PacketBuffer, id VarInt) ([]byte, error) {
+	w := NewWriter()
+	switch id {
+	case 1: // max stack size - VarInt
+		v, err := buf.ReadVarInt()
+		if err != nil {
+			return nil, err
+		}
+		w.WriteVarInt(v)
+	case 3: // damage - VarInt
+		v, err := buf.ReadVarInt()
+		if err != nil {
+			return nil, err
+		}
+		w.WriteVarInt(v)
+	case 4: // unbreakable - Boolean
+		v, err := buf.ReadBool()
+		if err != nil {
+			return nil, err
+		}
+		w.WriteBool(v)
+	default:
+		// unknown component - can't decode without knowing size
+		return nil, nil
+	}
+	return w.Bytes(), nil
+}
 
 func TestSlot_Empty(t *testing.T) {
 	slot := EmptySlot()
@@ -21,7 +48,7 @@ func TestSlot_Empty(t *testing.T) {
 	}
 
 	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(testSlotDecoder)
 	if err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
@@ -40,7 +67,7 @@ func TestSlot_ItemOnly(t *testing.T) {
 	}
 
 	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(testSlotDecoder)
 	if err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
@@ -56,9 +83,13 @@ func TestSlot_ItemOnly(t *testing.T) {
 	}
 }
 
-func TestSlot_WithDamageComponent(t *testing.T) {
-	slot := NewSlot(100, 1) // some tool
-	slot.AddComponent(&DamageComponent{Damage: 50})
+func TestSlot_WithRawComponent(t *testing.T) {
+	slot := NewSlot(100, 1)
+
+	// add damage component (ID 3) with VarInt value 50
+	damageData := NewWriter()
+	damageData.WriteVarInt(50)
+	slot.AddComponent(3, damageData.Bytes())
 
 	buf := NewWriter()
 	if err := slot.Encode(buf); err != nil {
@@ -66,7 +97,7 @@ func TestSlot_WithDamageComponent(t *testing.T) {
 	}
 
 	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(testSlotDecoder)
 	if err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
@@ -75,20 +106,39 @@ func TestSlot_WithDamageComponent(t *testing.T) {
 		t.Fatalf("Expected 1 component, got %d", len(decoded.Components.Add))
 	}
 
-	dmg, ok := decoded.Components.Add[0].(*DamageComponent)
-	if !ok {
-		t.Fatalf("Expected DamageComponent, got %T", decoded.Components.Add[0])
+	comp := decoded.Components.Add[0]
+	if comp.ID != 3 {
+		t.Errorf("Component ID mismatch: got %d, want 3", comp.ID)
 	}
-	if dmg.Damage != 50 {
-		t.Errorf("Damage mismatch: got %d, want %d", dmg.Damage, 50)
+
+	// decode the raw damage value
+	compBuf := NewReader(comp.Data)
+	damage, err := compBuf.ReadVarInt()
+	if err != nil {
+		t.Fatalf("Failed to read damage: %v", err)
+	}
+	if damage != 50 {
+		t.Errorf("Damage mismatch: got %d, want 50", damage)
 	}
 }
 
 func TestSlot_WithMultipleComponents(t *testing.T) {
 	slot := NewSlot(100, 1)
-	slot.AddComponent(&DamageComponent{Damage: 25})
-	slot.AddComponent(&MaxStackSizeComponent{MaxStackSize: 1})
-	slot.AddComponent(&UnbreakableComponent{ShowInTooltip: true})
+
+	// damage component (ID 3)
+	damageData := NewWriter()
+	damageData.WriteVarInt(25)
+	slot.AddComponent(3, damageData.Bytes())
+
+	// max stack size component (ID 1)
+	stackData := NewWriter()
+	stackData.WriteVarInt(1)
+	slot.AddComponent(1, stackData.Bytes())
+
+	// unbreakable component (ID 4)
+	unbData := NewWriter()
+	unbData.WriteBool(true)
+	slot.AddComponent(4, unbData.Bytes())
 
 	buf := NewWriter()
 	if err := slot.Encode(buf); err != nil {
@@ -96,7 +146,7 @@ func TestSlot_WithMultipleComponents(t *testing.T) {
 	}
 
 	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(testSlotDecoder)
 	if err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
@@ -106,175 +156,46 @@ func TestSlot_WithMultipleComponents(t *testing.T) {
 	}
 
 	// verify damage component
-	dmg := decoded.GetComponent(ComponentDamage)
+	dmg := decoded.GetComponent(3)
 	if dmg == nil {
-		t.Error("Missing DamageComponent")
-	} else if dmg.(*DamageComponent).Damage != 25 {
-		t.Errorf("Damage mismatch: got %d, want %d", dmg.(*DamageComponent).Damage, 25)
+		t.Error("Missing damage component")
+	} else {
+		dmgBuf := NewReader(dmg.Data)
+		dmgVal, _ := dmgBuf.ReadVarInt()
+		if dmgVal != 25 {
+			t.Errorf("Damage mismatch: got %d, want 25", dmgVal)
+		}
 	}
 
 	// verify max stack size
-	maxStack := decoded.GetComponent(ComponentMaxStackSize)
+	maxStack := decoded.GetComponent(1)
 	if maxStack == nil {
-		t.Error("Missing MaxStackSizeComponent")
-	} else if maxStack.(*MaxStackSizeComponent).MaxStackSize != 1 {
-		t.Errorf("MaxStackSize mismatch")
+		t.Error("Missing max stack size component")
+	} else {
+		stackBuf := NewReader(maxStack.Data)
+		stackVal, _ := stackBuf.ReadVarInt()
+		if stackVal != 1 {
+			t.Errorf("MaxStackSize mismatch: got %d, want 1", stackVal)
+		}
 	}
 
 	// verify unbreakable
-	unbreakable := decoded.GetComponent(ComponentUnbreakable)
-	if unbreakable == nil {
-		t.Error("Missing UnbreakableComponent")
-	} else if !unbreakable.(*UnbreakableComponent).ShowInTooltip {
-		t.Error("ShowInTooltip should be true")
-	}
-}
-
-func TestSlot_WithCustomName(t *testing.T) {
-	slot := NewSlot(100, 1)
-	slot.AddComponent(&CustomNameComponent{
-		Name: TextComponent{
-			Text:  "Epic Sword",
-			Color: "gold",
-		},
-	})
-
-	buf := NewWriter()
-	if err := slot.Encode(buf); err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	name := decoded.GetComponent(ComponentCustomName)
-	if name == nil {
-		t.Fatal("Missing CustomNameComponent")
-	}
-	customName := name.(*CustomNameComponent)
-	if customName.Name.Text != "Epic Sword" {
-		t.Errorf("Name.Text mismatch: got %q, want %q", customName.Name.Text, "Epic Sword")
-	}
-	if customName.Name.Color != "gold" {
-		t.Errorf("Name.Color mismatch: got %q, want %q", customName.Name.Color, "gold")
-	}
-}
-
-func TestSlot_WithLore(t *testing.T) {
-	slot := NewSlot(100, 1)
-	slot.AddComponent(&LoreComponent{
-		Lines: []TextComponent{
-			{Text: "Line 1", Color: "gray"},
-			{Text: "Line 2", Color: "dark_gray"},
-		},
-	})
-
-	buf := NewWriter()
-	if err := slot.Encode(buf); err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	lore := decoded.GetComponent(ComponentLore)
-	if lore == nil {
-		t.Fatal("Missing LoreComponent")
-	}
-	loreComp := lore.(*LoreComponent)
-	if len(loreComp.Lines) != 2 {
-		t.Fatalf("Expected 2 lore lines, got %d", len(loreComp.Lines))
-	}
-	if loreComp.Lines[0].Text != "Line 1" {
-		t.Errorf("Lore line 0 mismatch: got %q, want %q", loreComp.Lines[0].Text, "Line 1")
-	}
-}
-
-func TestSlot_WithEnchantments(t *testing.T) {
-	slot := NewSlot(100, 1)
-	slot.AddComponent(&EnchantmentsComponent{
-		Enchantments: map[VarInt]VarInt{
-			1: 3, // sharpness 3
-			2: 1, // smite 1
-		},
-		ShowInTooltip: true,
-	})
-
-	buf := NewWriter()
-	if err := slot.Encode(buf); err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	ench := decoded.GetComponent(ComponentEnchantments)
-	if ench == nil {
-		t.Fatal("Missing EnchantmentsComponent")
-	}
-	enchComp := ench.(*EnchantmentsComponent)
-	if len(enchComp.Enchantments) != 2 {
-		t.Fatalf("Expected 2 enchantments, got %d", len(enchComp.Enchantments))
-	}
-	if enchComp.Enchantments[1] != 3 {
-		t.Errorf("Sharpness level mismatch: got %d, want %d", enchComp.Enchantments[1], 3)
-	}
-	if !enchComp.ShowInTooltip {
-		t.Error("ShowInTooltip should be true")
-	}
-}
-
-func TestSlot_WithCustomData(t *testing.T) {
-	slot := NewSlot(100, 1)
-	slot.AddComponent(&CustomDataComponent{
-		Data: nbt.Compound{
-			"CustomKey":  nbt.String("custom value"),
-			"CustomInt":  nbt.Int(42),
-			"NestedData": nbt.Compound{"inner": nbt.Byte(1)},
-		},
-	})
-
-	buf := NewWriter()
-	if err := slot.Encode(buf); err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	customData := decoded.GetComponent(ComponentCustomData)
-	if customData == nil {
-		t.Fatal("Missing CustomDataComponent")
-	}
-	dataComp := customData.(*CustomDataComponent)
-	compound, ok := dataComp.Data.(nbt.Compound)
-	if !ok {
-		t.Fatalf("Expected nbt.Compound, got %T", dataComp.Data)
-	}
-	if compound.GetString("CustomKey") != "custom value" {
-		t.Errorf("CustomKey mismatch")
-	}
-	if compound.GetInt("CustomInt") != 42 {
-		t.Errorf("CustomInt mismatch")
+	unb := decoded.GetComponent(4)
+	if unb == nil {
+		t.Error("Missing unbreakable component")
+	} else {
+		unbBuf := NewReader(unb.Data)
+		unbVal, _ := unbBuf.ReadBool()
+		if !bool(unbVal) {
+			t.Error("ShowInTooltip should be true")
+		}
 	}
 }
 
 func TestSlot_WithRemovedComponents(t *testing.T) {
 	slot := NewSlot(100, 1)
-	slot.RemoveComponent(ComponentDamage)
-	slot.RemoveComponent(ComponentEnchantments)
+	slot.RemoveComponent(3)  // damage
+	slot.RemoveComponent(12) // enchantments
 
 	buf := NewWriter()
 	if err := slot.Encode(buf); err != nil {
@@ -282,7 +203,7 @@ func TestSlot_WithRemovedComponents(t *testing.T) {
 	}
 
 	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(testSlotDecoder)
 	if err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
@@ -290,56 +211,28 @@ func TestSlot_WithRemovedComponents(t *testing.T) {
 	if len(decoded.Components.Remove) != 2 {
 		t.Fatalf("Expected 2 removed components, got %d", len(decoded.Components.Remove))
 	}
-	if decoded.Components.Remove[0] != ComponentDamage {
-		t.Errorf("First removed component should be damage")
+	if decoded.Components.Remove[0] != 3 {
+		t.Errorf("First removed component should be 3 (damage)")
 	}
-	if decoded.Components.Remove[1] != ComponentEnchantments {
-		t.Errorf("Second removed component should be enchantments")
-	}
-}
-
-func TestSlot_DyedColor(t *testing.T) {
-	slot := NewSlot(100, 1) // leather armor
-	slot.AddComponent(&DyedColorComponent{
-		Color:         0xFF5500, // orange
-		ShowInTooltip: true,
-	})
-
-	buf := NewWriter()
-	if err := slot.Encode(buf); err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	dyed := decoded.GetComponent(ComponentDyedColor)
-	if dyed == nil {
-		t.Fatal("Missing DyedColorComponent")
-	}
-	dyedComp := dyed.(*DyedColorComponent)
-	if dyedComp.Color != 0xFF5500 {
-		t.Errorf("Color mismatch: got %x, want %x", dyedComp.Color, 0xFF5500)
-	}
-	if !dyedComp.ShowInTooltip {
-		t.Error("ShowInTooltip should be true")
+	if decoded.Components.Remove[1] != 12 {
+		t.Errorf("Second removed component should be 12 (enchantments)")
 	}
 }
 
 func TestSlot_RoundTrip(t *testing.T) {
 	slot := NewSlot(100, 32)
-	slot.AddComponent(&DamageComponent{Damage: 10})
-	slot.AddComponent(&CustomNameComponent{
-		Name: TextComponent{Text: "Test Item", Color: "blue"},
-	})
-	slot.AddComponent(&EnchantmentsComponent{
-		Enchantments:  map[VarInt]VarInt{5: 2},
-		ShowInTooltip: false,
-	})
-	slot.RemoveComponent(99) // some hypothetical component
+
+	// damage
+	damageData := NewWriter()
+	damageData.WriteVarInt(10)
+	slot.AddComponent(3, damageData.Bytes())
+
+	// max stack size
+	stackData := NewWriter()
+	stackData.WriteVarInt(64)
+	slot.AddComponent(1, stackData.Bytes())
+
+	slot.RemoveComponent(99)
 
 	// encode
 	buf := NewWriter()
@@ -350,7 +243,7 @@ func TestSlot_RoundTrip(t *testing.T) {
 
 	// decode
 	readBuf := NewReader(encoded)
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(testSlotDecoder)
 	if err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
@@ -370,15 +263,33 @@ func TestSlot_RoundTrip(t *testing.T) {
 
 func TestSlot_PacketBufferHelpers(t *testing.T) {
 	slot := NewSlot(50, 16)
-	slot.AddComponent(&MaxDamageComponent{MaxDamage: 100})
+
+	// max damage
+	maxDmgData := NewWriter()
+	maxDmgData.WriteVarInt(100)
+	slot.AddComponent(2, maxDmgData.Bytes()) // max damage = ID 2
 
 	buf := NewWriter()
 	if err := buf.WriteSlot(slot); err != nil {
 		t.Fatalf("WriteSlot failed: %v", err)
 	}
 
+	// use a decoder that handles ID 2
+	decoder := func(buf *PacketBuffer, id VarInt) ([]byte, error) {
+		if id == 2 {
+			w := NewWriter()
+			v, err := buf.ReadVarInt()
+			if err != nil {
+				return nil, err
+			}
+			w.WriteVarInt(v)
+			return w.Bytes(), nil
+		}
+		return nil, nil
+	}
+
 	readBuf := NewReader(buf.Bytes())
-	decoded, err := readBuf.ReadSlot()
+	decoded, err := readBuf.ReadSlot(decoder)
 	if err != nil {
 		t.Fatalf("ReadSlot failed: %v", err)
 	}
@@ -391,84 +302,21 @@ func TestSlot_PacketBufferHelpers(t *testing.T) {
 	}
 }
 
-func TestNewSlotComponent_KnownTypes(t *testing.T) {
-	tests := []struct {
-		id       VarInt
-		expected string
-	}{
-		{ComponentCustomData, "*net_structures.CustomDataComponent"},
-		{ComponentMaxStackSize, "*net_structures.MaxStackSizeComponent"},
-		{ComponentDamage, "*net_structures.DamageComponent"},
-		{ComponentCustomName, "*net_structures.CustomNameComponent"},
-		{ComponentLore, "*net_structures.LoreComponent"},
-		{ComponentEnchantments, "*net_structures.EnchantmentsComponent"},
-		{ComponentDyedColor, "*net_structures.DyedColorComponent"},
+func TestSlot_GetComponent(t *testing.T) {
+	slot := NewSlot(100, 1)
+	slot.AddComponent(3, []byte{0x32})
+	slot.AddComponent(5, []byte{0x01, 0x02})
+
+	comp := slot.GetComponent(3)
+	if comp == nil {
+		t.Fatal("GetComponent returned nil for existing component")
+	}
+	if comp.ID != 3 {
+		t.Errorf("Component ID mismatch: got %d, want 3", comp.ID)
 	}
 
-	for _, tt := range tests {
-		comp := NewSlotComponent(tt.id)
-		typeName := typeNameOf(comp)
-		if typeName != tt.expected {
-			t.Errorf("NewSlotComponent(%d) = %s, want %s", tt.id, typeName, tt.expected)
-		}
-	}
-}
-
-func TestNewSlotComponent_UnknownType(t *testing.T) {
-	comp := NewSlotComponent(9999) // unknown ID
-	raw, ok := comp.(*RawComponent)
-	if !ok {
-		t.Errorf("Expected RawComponent for unknown ID, got %T", comp)
-	}
-	if raw.ID != 9999 {
-		t.Errorf("RawComponent.ID = %d, want %d", raw.ID, 9999)
-	}
-}
-
-func typeNameOf(v any) string {
-	return typeName(v)
-}
-
-func typeName(v any) string {
-	if v == nil {
-		return "<nil>"
-	}
-	return typeNameStr(v)
-}
-
-func typeNameStr(v any) string {
-	return typeNameFromInterface(v)
-}
-
-func typeNameFromInterface(v any) string {
-	switch v.(type) {
-	case *CustomDataComponent:
-		return "*net_structures.CustomDataComponent"
-	case *MaxStackSizeComponent:
-		return "*net_structures.MaxStackSizeComponent"
-	case *MaxDamageComponent:
-		return "*net_structures.MaxDamageComponent"
-	case *DamageComponent:
-		return "*net_structures.DamageComponent"
-	case *UnbreakableComponent:
-		return "*net_structures.UnbreakableComponent"
-	case *CustomNameComponent:
-		return "*net_structures.CustomNameComponent"
-	case *ItemNameComponent:
-		return "*net_structures.ItemNameComponent"
-	case *LoreComponent:
-		return "*net_structures.LoreComponent"
-	case *RarityComponent:
-		return "*net_structures.RarityComponent"
-	case *EnchantmentsComponent:
-		return "*net_structures.EnchantmentsComponent"
-	case *RepairCostComponent:
-		return "*net_structures.RepairCostComponent"
-	case *DyedColorComponent:
-		return "*net_structures.DyedColorComponent"
-	case *RawComponent:
-		return "*net_structures.RawComponent"
-	default:
-		return "unknown"
+	comp2 := slot.GetComponent(999)
+	if comp2 != nil {
+		t.Error("GetComponent should return nil for non-existent component")
 	}
 }

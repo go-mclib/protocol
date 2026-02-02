@@ -5,6 +5,8 @@ import (
 )
 
 // Slot represents an item stack with data components.
+// Components are stored as raw bytes to keep this package protocol-level only.
+// Callers should use a higher-level package to parse specific component types.
 //
 // Wire format:
 //
@@ -24,18 +26,15 @@ type Slot struct {
 
 // SlotComponents holds the component modifications for a slot.
 type SlotComponents struct {
-	Add    []SlotComponent // components with data
-	Remove []VarInt        // component type IDs to remove
+	Add    []RawSlotComponent // components with data (ID + raw bytes)
+	Remove []VarInt           // component type IDs to remove
 }
 
-// SlotComponent is the interface for item data components.
-type SlotComponent interface {
-	// ComponentID returns the component type ID.
-	ComponentID() VarInt
-	// Encode writes the component data to the buffer.
-	Encode(buf *PacketBuffer) error
-	// Decode reads the component data from the buffer.
-	Decode(buf *PacketBuffer) error
+// RawSlotComponent stores a component as ID + raw bytes.
+// This allows passthrough without parsing component internals.
+type RawSlotComponent struct {
+	ID   VarInt
+	Data []byte
 }
 
 // EmptySlot returns an empty slot.
@@ -56,8 +55,29 @@ func (s *Slot) IsEmpty() bool {
 	return s.Count <= 0
 }
 
+// SlotDecoder is a function that decodes a component's data given its ID.
+// Returns the raw bytes of the component. If the component format is unknown,
+// return an error - there's no way to know where a component ends without
+// understanding its format.
+type SlotDecoder func(buf *PacketBuffer, componentID VarInt) ([]byte, error)
+
+// SlotEncoder is a function that encodes a component's data.
+// By default, raw bytes are written as-is.
+type SlotEncoder func(buf *PacketBuffer, componentID VarInt, data []byte) error
+
+// defaultSlotEncoder writes raw bytes as-is.
+func defaultSlotEncoder(buf *PacketBuffer, _ VarInt, data []byte) error {
+	_, err := buf.Write(data)
+	return err
+}
+
 // Encode writes the slot to the buffer.
 func (s *Slot) Encode(buf *PacketBuffer) error {
+	return s.EncodeWith(buf, defaultSlotEncoder)
+}
+
+// EncodeWith writes the slot using a custom encoder for components.
+func (s *Slot) EncodeWith(buf *PacketBuffer, encode SlotEncoder) error {
 	if err := buf.WriteVarInt(s.Count); err != nil {
 		return fmt.Errorf("failed to write slot count: %w", err)
 	}
@@ -82,10 +102,10 @@ func (s *Slot) Encode(buf *PacketBuffer) error {
 
 	// write added components
 	for i, comp := range s.Components.Add {
-		if err := buf.WriteVarInt(comp.ComponentID()); err != nil {
+		if err := buf.WriteVarInt(comp.ID); err != nil {
 			return fmt.Errorf("failed to write component %d id: %w", i, err)
 		}
-		if err := comp.Encode(buf); err != nil {
+		if err := encode(buf, comp.ID, comp.Data); err != nil {
 			return fmt.Errorf("failed to write component %d data: %w", i, err)
 		}
 	}
@@ -100,8 +120,9 @@ func (s *Slot) Encode(buf *PacketBuffer) error {
 	return nil
 }
 
-// Decode reads a slot from the buffer.
-func (s *Slot) Decode(buf *PacketBuffer) error {
+// Decode reads a slot from the buffer using a decoder that knows component sizes.
+// The decoder must return the raw bytes for each component.
+func (s *Slot) Decode(buf *PacketBuffer, decode SlotDecoder) error {
 	count, err := buf.ReadVarInt()
 	if err != nil {
 		return fmt.Errorf("failed to read slot count: %w", err)
@@ -128,18 +149,18 @@ func (s *Slot) Decode(buf *PacketBuffer) error {
 	}
 
 	// read added components
-	s.Components.Add = make([]SlotComponent, addCount)
+	s.Components.Add = make([]RawSlotComponent, addCount)
 	for i := range s.Components.Add {
 		compID, err := buf.ReadVarInt()
 		if err != nil {
 			return fmt.Errorf("failed to read component %d id: %w", i, err)
 		}
 
-		comp := NewSlotComponent(compID)
-		if err := comp.Decode(buf); err != nil {
+		data, err := decode(buf, compID)
+		if err != nil {
 			return fmt.Errorf("failed to read component %d (id=%d): %w", i, compID, err)
 		}
-		s.Components.Add[i] = comp
+		s.Components.Add[i] = RawSlotComponent{ID: compID, Data: data}
 	}
 
 	// read removed component IDs
@@ -154,10 +175,10 @@ func (s *Slot) Decode(buf *PacketBuffer) error {
 	return nil
 }
 
-// ReadSlot reads a slot from the buffer.
-func (pb *PacketBuffer) ReadSlot() (Slot, error) {
+// ReadSlot reads a slot from the buffer using the provided decoder.
+func (pb *PacketBuffer) ReadSlot(decode SlotDecoder) (Slot, error) {
 	var slot Slot
-	err := slot.Decode(pb)
+	err := slot.Decode(pb, decode)
 	return slot, err
 }
 
@@ -166,19 +187,24 @@ func (pb *PacketBuffer) WriteSlot(s Slot) error {
 	return s.Encode(pb)
 }
 
+// WriteSlotWith writes a slot using a custom encoder.
+func (pb *PacketBuffer) WriteSlotWith(s Slot, encode SlotEncoder) error {
+	return s.EncodeWith(pb, encode)
+}
+
 // GetComponent returns the first component with the given ID, or nil if not found.
-func (s *Slot) GetComponent(id VarInt) SlotComponent {
-	for _, comp := range s.Components.Add {
-		if comp.ComponentID() == id {
-			return comp
+func (s *Slot) GetComponent(id VarInt) *RawSlotComponent {
+	for i := range s.Components.Add {
+		if s.Components.Add[i].ID == id {
+			return &s.Components.Add[i]
 		}
 	}
 	return nil
 }
 
-// AddComponent adds a component to the slot.
-func (s *Slot) AddComponent(comp SlotComponent) {
-	s.Components.Add = append(s.Components.Add, comp)
+// AddComponent adds a raw component to the slot.
+func (s *Slot) AddComponent(id VarInt, data []byte) {
+	s.Components.Add = append(s.Components.Add, RawSlotComponent{ID: id, Data: data})
 }
 
 // RemoveComponent marks a component type for removal.
