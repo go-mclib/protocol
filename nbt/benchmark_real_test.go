@@ -1,3 +1,4 @@
+// go test -bench=. -benchmem
 package nbt_test
 
 import (

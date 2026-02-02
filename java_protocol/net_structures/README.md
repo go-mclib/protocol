@@ -217,6 +217,7 @@ fmt.Printf("velocity: %.4f, %.4f, %.4f\n", vel.X, vel.Y, vel.Z)
 ```
 
 Wire format:
+
 - If all components are essentially zero (< 3.05e-5), sends single `0x00` byte
 - Otherwise: 6 bytes encoding scale (3 bits) + X/Y/Z (15 bits each)
 
@@ -485,6 +486,7 @@ buf.WriteLightData(lightData)
 ```
 
 Wire format:
+
 - `SkyLightMask` - BitSet indicating sections with sky light
 - `BlockLightMask` - BitSet indicating sections with block light
 - `EmptySkyLightMask` - BitSet indicating sections with all-zero sky light
