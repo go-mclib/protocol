@@ -149,3 +149,16 @@ func EncodeNetwork(tag Tag) ([]byte, error) {
 func EncodeFile(tag Tag, rootName string) ([]byte, error) {
 	return Encode(tag, rootName, false)
 }
+
+// Copy reads an NBT tag from src and writes it to dst.
+// This is useful for passthrough scenarios where you don't need to inspect the data.
+func Copy(dst io.Writer, src io.Reader, network bool) error {
+	reader := NewReaderFrom(src)
+	tag, rootName, err := reader.ReadTag(network)
+	if err != nil {
+		return err
+	}
+
+	writer := NewWriterTo(dst)
+	return writer.WriteTag(tag, rootName, network)
+}

@@ -211,3 +211,50 @@ func (s *Slot) AddComponent(id VarInt, data []byte) {
 func (s *Slot) RemoveComponent(id VarInt) {
 	s.Components.Remove = append(s.Components.Remove, id)
 }
+
+// CopySlot copies a slot from src to this buffer.
+// This only works for empty slots or slots without component modifications.
+// For slots with components, use ReadSlot with a decoder and WriteSlot.
+func (pb *PacketBuffer) CopySlot(src *PacketBuffer) error {
+	count, err := src.ReadVarInt()
+	if err != nil {
+		return err
+	}
+	if err := pb.WriteVarInt(count); err != nil {
+		return err
+	}
+
+	if count <= 0 {
+		return nil
+	}
+
+	// item ID
+	if err := pb.CopyVarInt(src); err != nil {
+		return err
+	}
+
+	// add count
+	addCount, err := src.ReadVarInt()
+	if err != nil {
+		return err
+	}
+	if err := pb.WriteVarInt(addCount); err != nil {
+		return err
+	}
+
+	// remove count
+	removeCount, err := src.ReadVarInt()
+	if err != nil {
+		return err
+	}
+	if err := pb.WriteVarInt(removeCount); err != nil {
+		return err
+	}
+
+	// component data requires a decoder to know sizes
+	if addCount > 0 || removeCount > 0 {
+		return fmt.Errorf("cannot copy slot with components without decoder; use ReadSlot/WriteSlot")
+	}
+
+	return nil
+}
