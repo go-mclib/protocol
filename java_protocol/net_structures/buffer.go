@@ -351,3 +351,113 @@ func (pb *PacketBuffer) ReadAngle() (Angle, error) {
 func (pb *PacketBuffer) WriteAngle(v Angle) error {
 	return v.Encode(pb.writer)
 }
+
+// --- Copy methods for primitives (read from source, write to this buffer) ---
+
+// CopyVarInt copies a VarInt from src to this buffer.
+func (pb *PacketBuffer) CopyVarInt(src *PacketBuffer) error {
+	v, err := src.ReadVarInt()
+	if err != nil {
+		return err
+	}
+	return pb.WriteVarInt(v)
+}
+
+// CopyVarLong copies a VarLong from src to this buffer.
+func (pb *PacketBuffer) CopyVarLong(src *PacketBuffer) error {
+	v, err := src.ReadVarLong()
+	if err != nil {
+		return err
+	}
+	return pb.WriteVarLong(v)
+}
+
+// CopyBool copies a Boolean from src to this buffer.
+func (pb *PacketBuffer) CopyBool(src *PacketBuffer) error {
+	v, err := src.ReadBool()
+	if err != nil {
+		return err
+	}
+	return pb.WriteBool(v)
+}
+
+// CopyInt8 copies an Int8 from src to this buffer.
+func (pb *PacketBuffer) CopyInt8(src *PacketBuffer) error {
+	v, err := src.ReadInt8()
+	if err != nil {
+		return err
+	}
+	return pb.WriteInt8(v)
+}
+
+// CopyInt16 copies an Int16 from src to this buffer.
+func (pb *PacketBuffer) CopyInt16(src *PacketBuffer) error {
+	v, err := src.ReadInt16()
+	if err != nil {
+		return err
+	}
+	return pb.WriteInt16(v)
+}
+
+// CopyInt32 copies an Int32 from src to this buffer.
+func (pb *PacketBuffer) CopyInt32(src *PacketBuffer) error {
+	v, err := src.ReadInt32()
+	if err != nil {
+		return err
+	}
+	return pb.WriteInt32(v)
+}
+
+// CopyInt64 copies an Int64 from src to this buffer.
+func (pb *PacketBuffer) CopyInt64(src *PacketBuffer) error {
+	v, err := src.ReadInt64()
+	if err != nil {
+		return err
+	}
+	return pb.WriteInt64(v)
+}
+
+// CopyFloat32 copies a Float32 from src to this buffer.
+func (pb *PacketBuffer) CopyFloat32(src *PacketBuffer) error {
+	v, err := src.ReadFloat32()
+	if err != nil {
+		return err
+	}
+	return pb.WriteFloat32(v)
+}
+
+// CopyFloat64 copies a Float64 from src to this buffer.
+func (pb *PacketBuffer) CopyFloat64(src *PacketBuffer) error {
+	v, err := src.ReadFloat64()
+	if err != nil {
+		return err
+	}
+	return pb.WriteFloat64(v)
+}
+
+// CopyString copies a String from src to this buffer.
+func (pb *PacketBuffer) CopyString(src *PacketBuffer, maxLen int) error {
+	v, err := src.ReadString(maxLen)
+	if err != nil {
+		return err
+	}
+	return pb.WriteString(v)
+}
+
+// CopyUUID copies a UUID from src to this buffer.
+func (pb *PacketBuffer) CopyUUID(src *PacketBuffer) error {
+	v, err := src.ReadUUID()
+	if err != nil {
+		return err
+	}
+	return pb.WriteUUID(v)
+}
+
+// CopyPosition copies a Position from src to this buffer.
+func (pb *PacketBuffer) CopyPosition(src *PacketBuffer) error {
+	v, err := src.ReadPosition()
+	if err != nil {
+		return err
+	}
+	return pb.WritePosition(v)
+}
