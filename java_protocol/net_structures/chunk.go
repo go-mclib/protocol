@@ -1,34 +1,34 @@
 package net_structures
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/go-mclib/protocol/nbt"
 )
 
 // ChunkData represents the data portion of chunk packets.
-// Heightmaps are stored as raw NBT, chunk sections as raw bytes.
-// Callers should parse block data according to their registry.
+// Heightmaps are encoded as a VarInt-keyed map of long arrays (protocol 774+).
+// Chunk sections are raw bytes. Block entities follow.
 //
 // Wire format:
 //
 //	┌─────────────────────────────────────────────────────────────────────────┐
-//	│  Heightmaps (NBT Compound)                                              │
+//	│  Heightmaps (VarInt count + entries of VarInt key + VarInt len + longs) │
 //	├─────────────────────────────────────────────────────────────────────────┤
 //	│  Data (VarInt length + raw bytes containing chunk sections)             │
 //	├─────────────────────────────────────────────────────────────────────────┤
 //	│  BlockEntities (VarInt length + array of BlockEntity)                   │
 //	└─────────────────────────────────────────────────────────────────────────┘
 type ChunkData struct {
-	// Heightmaps as raw NBT compound. Contains entries like MOTION_BLOCKING,
-	// WORLD_SURFACE, etc. as long arrays. Structure depends on world height.
-	Heightmaps nbt.Tag
+	// Heightmaps maps heightmap type IDs to long arrays.
+	// Type IDs: 1=WORLD_SURFACE, 4=MOTION_BLOCKING, 5=MOTION_BLOCKING_NO_LEAVES.
+	Heightmaps map[int32][]int64
 
 	// Data contains packed chunk sections. Each section contains:
 	// - Block count (short)
 	// - Block states (paletted container)
 	// - Biomes (paletted container)
-	// Parsing requires knowledge of current registry.
 	Data []byte
 
 	// BlockEntities in this chunk.
@@ -78,13 +78,31 @@ func (b *BlockEntity) SetXZ(x, z int) {
 
 // Decode reads ChunkData from the buffer.
 func (c *ChunkData) Decode(buf *PacketBuffer) error {
-	// read heightmaps NBT
-	nbtReader := nbt.NewReaderFrom(buf.Reader())
-	tag, _, err := nbtReader.ReadTag(true)
+	// read heightmaps map: VarInt count, then (VarInt key, VarInt len, Int64[len]) entries
+	hmCount, err := buf.ReadVarInt()
 	if err != nil {
-		return fmt.Errorf("failed to read heightmaps: %w", err)
+		return fmt.Errorf("failed to read heightmap count: %w", err)
 	}
-	c.Heightmaps = tag
+	c.Heightmaps = make(map[int32][]int64, hmCount)
+	for range int(hmCount) {
+		key, err := buf.ReadVarInt()
+		if err != nil {
+			return fmt.Errorf("failed to read heightmap type: %w", err)
+		}
+		arrLen, err := buf.ReadVarInt()
+		if err != nil {
+			return fmt.Errorf("failed to read heightmap array length: %w", err)
+		}
+		longs := make([]int64, arrLen)
+		for j := range longs {
+			var b [8]byte
+			if _, err := buf.Read(b[:]); err != nil {
+				return fmt.Errorf("failed to read heightmap long %d: %w", j, err)
+			}
+			longs[j] = int64(binary.BigEndian.Uint64(b[:]))
+		}
+		c.Heightmaps[int32(key)] = longs
+	}
 
 	// read chunk data as byte array (max ~2MB for full chunk)
 	c.Data, err = buf.ReadByteArray(2097152)
@@ -110,16 +128,24 @@ func (c *ChunkData) Decode(buf *PacketBuffer) error {
 
 // Encode writes ChunkData to the buffer.
 func (c *ChunkData) Encode(buf *PacketBuffer) error {
-	// write heightmaps NBT
-	if c.Heightmaps == nil {
-		c.Heightmaps = nbt.Compound{}
+	// write heightmaps map
+	if err := buf.WriteVarInt(VarInt(len(c.Heightmaps))); err != nil {
+		return fmt.Errorf("failed to write heightmap count: %w", err)
 	}
-	nbtData, err := nbt.Encode(c.Heightmaps, "", true)
-	if err != nil {
-		return fmt.Errorf("failed to encode heightmaps: %w", err)
-	}
-	if _, err := buf.Write(nbtData); err != nil {
-		return fmt.Errorf("failed to write heightmaps: %w", err)
+	for key, longs := range c.Heightmaps {
+		if err := buf.WriteVarInt(VarInt(key)); err != nil {
+			return fmt.Errorf("failed to write heightmap type: %w", err)
+		}
+		if err := buf.WriteVarInt(VarInt(len(longs))); err != nil {
+			return fmt.Errorf("failed to write heightmap array length: %w", err)
+		}
+		for _, v := range longs {
+			var b [8]byte
+			binary.BigEndian.PutUint64(b[:], uint64(v))
+			if _, err := buf.Write(b[:]); err != nil {
+				return fmt.Errorf("failed to write heightmap long: %w", err)
+			}
+		}
 	}
 
 	// write chunk data

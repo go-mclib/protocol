@@ -166,14 +166,14 @@ func TestLightData_RoundTrip(t *testing.T) {
 }
 
 // ChunkData wire format:
-//   NBT heightmaps (nameless root)
+//   VarInt heightmap count + (VarInt key + VarInt longCount + Int64[]) entries
 //   VarInt dataLen + raw bytes
 //   VarInt blockEntityCount + BlockEntity × count
 
 func TestChunkData_RoundTrip(t *testing.T) {
 	cd := ns.ChunkData{
-		Heightmaps: nbt.Compound{
-			"MOTION_BLOCKING": nbt.LongArray(make([]int64, 37)),
+		Heightmaps: map[int32][]int64{
+			4: make([]int64, 37), // MOTION_BLOCKING
 		},
 		Data:          []byte{0x01, 0x02, 0x03, 0x04},
 		BlockEntities: []ns.BlockEntity{},
@@ -198,11 +198,17 @@ func TestChunkData_RoundTrip(t *testing.T) {
 	if len(decoded.BlockEntities) != 0 {
 		t.Errorf("BlockEntities count mismatch: got %d, want 0", len(decoded.BlockEntities))
 	}
+	if len(decoded.Heightmaps) != 1 {
+		t.Errorf("Heightmaps count mismatch: got %d, want 1", len(decoded.Heightmaps))
+	}
+	if longs, ok := decoded.Heightmaps[4]; !ok || len(longs) != 37 {
+		t.Errorf("Heightmaps MOTION_BLOCKING mismatch")
+	}
 }
 
 func TestChunkData_WithBlockEntities(t *testing.T) {
 	cd := ns.ChunkData{
-		Heightmaps: nbt.Compound{},
+		Heightmaps: map[int32][]int64{},
 		Data:       []byte{},
 		BlockEntities: []ns.BlockEntity{
 			{PackedXZ: 0x00, Y: 64, Type: 7, Data: nbt.Compound{}},

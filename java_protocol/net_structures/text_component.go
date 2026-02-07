@@ -38,9 +38,9 @@ type TextComponent struct {
 	Font          string `nbt:"font,omitempty"`
 	Insertion     string `nbt:"insertion,omitempty"`
 
-	// click/hover events
-	ClickEvent *ClickEvent `nbt:"clickEvent,omitempty"`
-	HoverEvent *HoverEvent `nbt:"hoverEvent,omitempty"`
+	// click/hover events (1.21.5+ uses snake_case field names)
+	ClickEvent *ClickEvent `nbt:"click_event,omitempty"`
+	HoverEvent *HoverEvent `nbt:"hover_event,omitempty"`
 
 	// children
 	Extra []TextComponent `nbt:"extra,omitempty"`
@@ -52,16 +52,34 @@ type Score struct {
 	Objective string `nbt:"objective"`
 }
 
-// ClickEvent represents a click event for text components.
+// ClickEvent represents a click event for text components (1.21.5+ format).
+// Each action type uses a different field; the Action field determines which is relevant.
 type ClickEvent struct {
-	Action string `nbt:"action"`
-	Value  string `nbt:"value"`
+	Action  string `nbt:"action"`
+	URL     string `nbt:"url,omitempty"`     // open_url
+	Path    string `nbt:"path,omitempty"`    // open_file
+	Command string `nbt:"command,omitempty"` // run_command, suggest_command
+	Page    int32  `nbt:"page,omitempty"`    // change_page
+	Value   string `nbt:"value,omitempty"`   // copy_to_clipboard
+	Dialog  any    `nbt:"dialog,omitempty"`  // show_dialog
+	ID      string `nbt:"id,omitempty"`      // custom
+	Payload any    `nbt:"payload,omitempty"` // custom
 }
 
-// HoverEvent represents a hover event for text components.
+// HoverEvent represents a hover event for text components (1.21.5+ format).
+// Each action type uses different fields; the Action field determines which are relevant.
 type HoverEvent struct {
-	Action   string `nbt:"action"`
-	Contents any    `nbt:"contents,omitempty"`
+	Action string `nbt:"action"`
+	// show_text
+	Value any `nbt:"value,omitempty"` // TextComponent (string or compound NBT)
+	// show_entity and show_item
+	ID string `nbt:"id,omitempty"` // entity type or item ID
+	// show_entity
+	EntityUUID any `nbt:"uuid,omitempty"` // IntArray in NBT
+	Name       any `nbt:"name,omitempty"` // optional TextComponent (string or compound NBT)
+	// show_item
+	Count      int32 `nbt:"count,omitempty"`
+	Components any   `nbt:"components,omitempty"` // item components compound
 }
 
 // NewTextComponent creates a simple text component with the given text.

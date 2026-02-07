@@ -61,7 +61,7 @@ func TestTextComponent_Complex(t *testing.T) {
 		{Text: "Styled", Color: "red"},
 		{Text: "Hello, ", Extra: []ns.TextComponent{{Text: "World", Color: "gold"}}},
 		{Translate: "chat.type.text", With: []ns.TextComponent{{Text: "Player"}, {Text: "Hello"}}},
-		{Text: "Click me", ClickEvent: &ns.ClickEvent{Action: "open_url", Value: "https://minecraft.net"}},
+		{Text: "Click me", ClickEvent: &ns.ClickEvent{Action: "open_url", URL: "https://minecraft.net"}},
 	}
 
 	for _, tc := range cases {
