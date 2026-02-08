@@ -77,11 +77,7 @@ func FetchMojangCertificate(accessToken string) (*MojangCertificateData, error) 
 	block, _ := pem.Decode([]byte(cert.KeyPair.PublicKey))
 	var publicKeyBytes []byte
 	if block != nil {
-		if rsaPubKey, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
-			if rsaKey, ok := rsaPubKey.(*rsa.PublicKey); ok {
-				publicKeyBytes, _ = x509.MarshalPKIXPublicKey(rsaKey)
-			}
-		}
+		publicKeyBytes = block.Bytes // SPKI DER
 	}
 
 	signatureBytes, err := base64.StdEncoding.DecodeString(cert.PublicKeySignatureV2)

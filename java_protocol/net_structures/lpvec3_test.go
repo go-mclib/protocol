@@ -66,6 +66,12 @@ func TestLpVec3_RoundTrip(t *testing.T) {
 		{"unit z", ns.LpVec3{0, 0, 1.0}, 0.001},
 		{"mixed", ns.LpVec3{0.5, -0.25, 0.125}, 0.001},
 		{"typical velocity", ns.LpVec3{0.0784, -0.0784, 0}, 0.001},
+		{"knockback north", ns.LpVec3{0, 0.4, -0.4}, 0.001},
+		{"knockback south", ns.LpVec3{0, 0.4, 0.4}, 0.001},
+		{"knockback east", ns.LpVec3{0.4, 0.4, 0}, 0.001},
+		{"sprint knockback", ns.LpVec3{0, 0.4, -0.8}, 0.001},
+		{"large velocity", ns.LpVec3{3.5, -2.1, 0.7}, 0.01},
+		{"very large", ns.LpVec3{10.0, -10.0, 5.0}, 0.01},
 	}
 
 	for _, tc := range cases {

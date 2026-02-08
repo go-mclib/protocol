@@ -140,6 +140,18 @@ func (tc *TextComponent) Encode(buf *PacketBuffer) error {
 	return err
 }
 
+// UnmarshalNBT implements nbt.TagUnmarshaler, allowing TextComponent to be
+// correctly unmarshaled from both NBT String (plain text shorthand) and Compound tags.
+func (tc *TextComponent) UnmarshalNBT(tag nbt.Tag) error {
+	if s, ok := tag.(nbt.String); ok {
+		*tc = TextComponent{Text: string(s)}
+		return nil
+	}
+	// use type alias to avoid infinite recursion through TagUnmarshaler
+	type plain TextComponent
+	return nbt.UnmarshalTag(tag, (*plain)(tc))
+}
+
 // Decode reads a text component from NBT.
 func (tc *TextComponent) Decode(buf *PacketBuffer) error {
 	nbtReader := nbt.NewReaderFrom(buf.Reader())
@@ -147,14 +159,7 @@ func (tc *TextComponent) Decode(buf *PacketBuffer) error {
 	if err != nil {
 		return err
 	}
-
-	// handle plain string shorthand
-	if s, ok := tag.(nbt.String); ok {
-		*tc = TextComponent{Text: string(s)}
-		return nil
-	}
-
-	return nbt.UnmarshalTag(tag, tc)
+	return tc.UnmarshalNBT(tag)
 }
 
 // ReadTextComponent reads a text component from the buffer.

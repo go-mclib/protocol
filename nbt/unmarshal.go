@@ -51,6 +51,12 @@ func UnmarshalTag(tag Tag, v any) error {
 	return unmarshalValue(tag, rv.Elem())
 }
 
+// TagUnmarshaler allows types to customize how they are unmarshaled from NBT.
+// This is useful for types like TextComponent that can be either a String or Compound.
+type TagUnmarshaler interface {
+	UnmarshalNBT(tag Tag) error
+}
+
 func unmarshalValue(tag Tag, v reflect.Value) error {
 	// Handle nil tags
 	if tag == nil {
@@ -71,6 +77,13 @@ func unmarshalValue(tag Tag, v reflect.Value) error {
 			v.Set(reflect.New(v.Type().Elem()))
 		}
 		return unmarshalValue(tag, v.Elem())
+	}
+
+	// Check if the value implements TagUnmarshaler
+	if v.CanAddr() {
+		if u, ok := v.Addr().Interface().(TagUnmarshaler); ok {
+			return u.UnmarshalNBT(tag)
+		}
 	}
 
 	// Handle interface types
