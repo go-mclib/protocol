@@ -354,7 +354,7 @@ if _, isEmpty := tag.(nbt.End); isEmpty {
 
 ### Text Component
 
-Text components are used for chat messages, item names, titles, and other formatted text. Since 1.20.3+, they are encoded as binary NBT over the network (not JSON or SNBT). Simple text-only components use NBT String tags, complex components use NBT Compound tags.
+Text components are used for chat messages, item names, titles, and other formatted text. Simple text-only components use NBT String tags, complex components use NBT Compound tags. JSON serialization is also supported (all fields carry `json` struct tags).
 
 ```go
 // simple text
@@ -383,10 +383,30 @@ tc := ns.TextComponent{
     },
 }
 
-// read/write
+// read/write (NBT format)
 buf.WriteTextComponent(tc)
 tc, _ := buf.ReadTextComponent()
+
+// JSON (handles both plain strings and objects)
+json.Unmarshal([]byte(`"Hello"`), &tc)        // plain string
+json.Unmarshal([]byte(`{"text":"Hello"}`), &tc) // object
+data, _ := json.Marshal(tc)
 ```
+
+#### Rendering
+
+Text components can be converted to various text formats:
+
+```go
+tc := ns.TextComponent{Text: "Hello", Color: "red", Bold: &bold}
+
+tc.String()     // "Hello"                - plain text, no formatting
+tc.ANSI()       // "\033[91m\033[1mHello\033[0m" - ANSI terminal colors
+tc.ColorCodes() // "§c§lHello"            - Bukkit-style § color codes
+tc.MiniMessage() // "<red><bold>Hello</bold></red>" - Adventure MiniMessage
+```
+
+All renderers recurse into `Extra` and `With` children. `ANSI()` supports named colors, hex colors (`#rrggbb` via 24-bit ANSI), bold, italic, underline, strikethrough, and obfuscated. `MiniMessage()` emits `<lang:key:args>` for translatable components and `<key:name>` for keybinds.
 
 ### Slot (Item Stack)
 

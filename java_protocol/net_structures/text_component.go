@@ -1,6 +1,8 @@
 package net_structures
 
 import (
+	"encoding/json"
+
 	"github.com/go-mclib/protocol/nbt"
 )
 
@@ -14,36 +16,36 @@ import (
 // Wire format: NBT (network format, nameless root)
 type TextComponent struct {
 	// content types (only one should be set)
-	Text       string `nbt:"text,omitempty"`
-	Translate  string `nbt:"translate,omitempty"`
-	Keybind    string `nbt:"keybind,omitempty"`
-	Score      *Score `nbt:"score,omitempty"`
-	Selector   string `nbt:"selector,omitempty"`
-	NBT        string `nbt:"nbt,omitempty"`
-	NBTBlock   string `nbt:"block,omitempty"`     // for nbt content type
-	NBTEntity  string `nbt:"entity,omitempty"`    // for nbt content type
-	NBTStorage string `nbt:"storage,omitempty"`   // for nbt content type
-	Interpret  *bool  `nbt:"interpret,omitempty"` // for nbt content type
+	Text       string `nbt:"text,omitempty" json:"text,omitempty"`
+	Translate  string `nbt:"translate,omitempty" json:"translate,omitempty"`
+	Keybind    string `nbt:"keybind,omitempty" json:"keybind,omitempty"`
+	Score      *Score `nbt:"score,omitempty" json:"score,omitempty"`
+	Selector   string `nbt:"selector,omitempty" json:"selector,omitempty"`
+	NBT        string `nbt:"nbt,omitempty" json:"nbt,omitempty"`
+	NBTBlock   string `nbt:"block,omitempty" json:"block,omitempty"`         // for nbt content type
+	NBTEntity  string `nbt:"entity,omitempty" json:"entity,omitempty"`       // for nbt content type
+	NBTStorage string `nbt:"storage,omitempty" json:"storage,omitempty"`     // for nbt content type
+	Interpret  *bool  `nbt:"interpret,omitempty" json:"interpret,omitempty"` // for nbt content type
 
 	// translation arguments (for translate content type)
-	With []TextComponent `nbt:"with,omitempty"`
+	With []TextComponent `nbt:"with,omitempty" json:"with,omitempty"`
 
 	// style
-	Color         string `nbt:"color,omitempty"`
-	Bold          *bool  `nbt:"bold,omitempty"`
-	Italic        *bool  `nbt:"italic,omitempty"`
-	Underlined    *bool  `nbt:"underlined,omitempty"`
-	Strikethrough *bool  `nbt:"strikethrough,omitempty"`
-	Obfuscated    *bool  `nbt:"obfuscated,omitempty"`
-	Font          string `nbt:"font,omitempty"`
-	Insertion     string `nbt:"insertion,omitempty"`
+	Color         string `nbt:"color,omitempty" json:"color,omitempty"`
+	Bold          *bool  `nbt:"bold,omitempty" json:"bold,omitempty"`
+	Italic        *bool  `nbt:"italic,omitempty" json:"italic,omitempty"`
+	Underlined    *bool  `nbt:"underlined,omitempty" json:"underlined,omitempty"`
+	Strikethrough *bool  `nbt:"strikethrough,omitempty" json:"strikethrough,omitempty"`
+	Obfuscated    *bool  `nbt:"obfuscated,omitempty" json:"obfuscated,omitempty"`
+	Font          string `nbt:"font,omitempty" json:"font,omitempty"`
+	Insertion     string `nbt:"insertion,omitempty" json:"insertion,omitempty"`
 
-	// click/hover events (1.21.5+ uses snake_case field names)
-	ClickEvent *ClickEvent `nbt:"click_event,omitempty"`
-	HoverEvent *HoverEvent `nbt:"hover_event,omitempty"`
+	// click/hover events
+	ClickEvent *ClickEvent `nbt:"click_event,omitempty" json:"clickEvent,omitempty"`
+	HoverEvent *HoverEvent `nbt:"hover_event,omitempty" json:"hoverEvent,omitempty"`
 
 	// children
-	Extra []TextComponent `nbt:"extra,omitempty"`
+	Extra []TextComponent `nbt:"extra,omitempty" json:"extra,omitempty"`
 }
 
 // Score represents score component content.
@@ -138,6 +140,20 @@ func (tc *TextComponent) Encode(buf *PacketBuffer) error {
 	}
 	_, err = buf.Write(data)
 	return err
+}
+
+// UnmarshalJSON handles both plain JSON strings (e.g. `"hello"`) and
+// JSON objects (e.g. `{"text":"hello","color":"red"}`).
+func (tc *TextComponent) UnmarshalJSON(data []byte) error {
+	// try plain string first
+	var s string
+	if json.Unmarshal(data, &s) == nil {
+		*tc = TextComponent{Text: s}
+		return nil
+	}
+	// avoid infinite recursion through json.Unmarshaler
+	type plain TextComponent
+	return json.Unmarshal(data, (*plain)(tc))
 }
 
 // UnmarshalNBT implements nbt.TagUnmarshaler, allowing TextComponent to be
