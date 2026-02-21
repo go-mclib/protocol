@@ -7,10 +7,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // TCPClient is a Minecraft protocol client connection.
 type TCPClient struct {
+	writeMu              sync.Mutex
 	conn                 *Conn
 	state                State
 	compressionThreshold int
@@ -98,15 +100,20 @@ func (c *TCPClient) SetLogger(l *log.Logger) {
 }
 
 // WritePacket writes a typed Packet to the connection.
+// Safe for concurrent use from multiple goroutines.
 func (c *TCPClient) WritePacket(p Packet) error {
 	if c.conn == nil {
 		return fmt.Errorf("connection is nil")
 	}
 
+	// serialize outside the lock (CPU work, no I/O)
 	wire, err := ToWire(p)
 	if err != nil {
 		return fmt.Errorf("failed to serialize packet: %w", err)
 	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 
 	c.debugf("-> send: state=%v bound=%v id=0x%02X", p.State(), p.Bound(), int(p.ID()))
 
