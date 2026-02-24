@@ -66,7 +66,7 @@ func marshalValue(v reflect.Value) (Tag, error) {
 	}
 
 	// dereference pointers
-	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			return Compound{}, nil
 		}
@@ -256,8 +256,8 @@ type tagOptions string
 
 // parseTag splits a struct field's nbt tag into name and options.
 func parseTag(tag string) (string, tagOptions) {
-	if idx := strings.Index(tag, ","); idx != -1 {
-		return tag[:idx], tagOptions(tag[idx+1:])
+	if before, after, ok := strings.Cut(tag, ","); ok {
+		return before, tagOptions(after)
 	}
 	return tag, ""
 }

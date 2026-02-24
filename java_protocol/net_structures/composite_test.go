@@ -11,7 +11,7 @@ import (
 func bitSetFromLongs(longs []int64) *ns.BitSet {
 	bs := ns.NewBitSet(len(longs) * 64)
 	for i, v := range longs {
-		for bit := 0; bit < 64; bit++ {
+		for bit := range 64 {
 			if (v & (1 << bit)) != 0 {
 				bs.Set(i*64 + bit)
 			}

@@ -193,7 +193,7 @@ func (r *Reader) readList() (List, error) {
 	}
 
 	elements := make([]Tag, length)
-	for i := int32(0); i < length; i++ {
+	for i := range length {
 		elem, err := r.readTagPayload(elemType)
 		if err != nil {
 			return List{}, fmt.Errorf("failed to read list element %d: %w", i, err)
@@ -248,7 +248,7 @@ func (r *Reader) readIntArray() (IntArray, error) {
 	}
 
 	data := make(IntArray, length)
-	for i := int32(0); i < length; i++ {
+	for i := range length {
 		v, err := r.readInt()
 		if err != nil {
 			return nil, err
@@ -268,7 +268,7 @@ func (r *Reader) readLongArray() (LongArray, error) {
 	}
 
 	data := make(LongArray, length)
-	for i := int32(0); i < length; i++ {
+	for i := range length {
 		v, err := r.readLong()
 		if err != nil {
 			return nil, err

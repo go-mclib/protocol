@@ -45,7 +45,7 @@ func UnmarshalOptions(data []byte, v any, network bool, opts ...ReaderOption) er
 // UnmarshalTag converts an NBT Tag to a Go value.
 func UnmarshalTag(tag Tag, v any) error {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("unmarshal target must be a non-nil pointer")
 	}
 	return unmarshalValue(tag, rv.Elem())
@@ -64,7 +64,7 @@ func unmarshalValue(tag Tag, v reflect.Value) error {
 	}
 
 	// If target implements Tag, set directly if same type
-	if v.Type().Implements(reflect.TypeOf((*Tag)(nil)).Elem()) {
+	if v.Type().Implements(reflect.TypeFor[Tag]()) {
 		if reflect.TypeOf(tag).AssignableTo(v.Type()) {
 			v.Set(reflect.ValueOf(tag))
 			return nil
@@ -72,7 +72,7 @@ func unmarshalValue(tag Tag, v reflect.Value) error {
 	}
 
 	// Handle pointer types
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			v.Set(reflect.New(v.Type().Elem()))
 		}
@@ -181,10 +181,7 @@ func unmarshalByteArray(data ByteArray, v reflect.Value) error {
 		}
 	case reflect.Array:
 		if v.Type().Elem().Kind() == reflect.Uint8 {
-			n := v.Len()
-			if len(data) < n {
-				n = len(data)
-			}
+			n := min(len(data), v.Len())
 			for i := 0; i < n; i++ {
 				v.Index(i).SetUint(uint64(data[i]))
 			}

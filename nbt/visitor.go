@@ -308,7 +308,7 @@ func visitList(r *Reader, v Visitor) error {
 		return err
 	}
 
-	for i := int32(0); i < length; i++ {
+	for range length {
 		if err := visitTagPayload(r, elemType, elemVisitor); err != nil {
 			return err
 		}
@@ -395,7 +395,7 @@ func skipTagPayload(r *Reader, tagType byte) error {
 		if err != nil {
 			return err
 		}
-		for i := int32(0); i < length; i++ {
+		for range length {
 			if err := skipTagPayload(r, elemType); err != nil {
 				return err
 			}
@@ -422,7 +422,7 @@ func skipTagPayload(r *Reader, tagType byte) error {
 		if err != nil {
 			return err
 		}
-		for i := int32(0); i < length; i++ {
+		for range length {
 			if _, err := r.readInt(); err != nil {
 				return err
 			}
@@ -433,7 +433,7 @@ func skipTagPayload(r *Reader, tagType byte) error {
 		if err != nil {
 			return err
 		}
-		for i := int32(0); i < length; i++ {
+		for range length {
 			if _, err := r.readLong(); err != nil {
 				return err
 			}
