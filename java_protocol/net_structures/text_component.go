@@ -178,14 +178,37 @@ func (tc *TextComponent) Decode(buf *PacketBuffer) error {
 	return tc.UnmarshalNBT(tag)
 }
 
-// ReadTextComponent reads a text component from the buffer.
+// ReadTextComponent reads a text component from the buffer (NBT wire format).
 func (pb *PacketBuffer) ReadTextComponent() (TextComponent, error) {
 	var tc TextComponent
 	err := tc.Decode(pb)
 	return tc, err
 }
 
-// WriteTextComponent writes a text component to the buffer.
+// WriteTextComponent writes a text component to the buffer (NBT wire format).
 func (pb *PacketBuffer) WriteTextComponent(tc TextComponent) error {
 	return tc.Encode(pb)
+}
+
+// ReadJsonTextComponent reads a text component as a VarInt-prefixed JSON string.
+// Used by login disconnect (ByteBufCodecs.lenientJson in vanilla).
+func (pb *PacketBuffer) ReadJsonTextComponent() (TextComponent, error) {
+	s, err := pb.ReadString(262144)
+	if err != nil {
+		return TextComponent{}, err
+	}
+	var tc TextComponent
+	if err := json.Unmarshal([]byte(s), &tc); err != nil {
+		return TextComponent{}, err
+	}
+	return tc, nil
+}
+
+// WriteJsonTextComponent writes a text component as a VarInt-prefixed JSON string.
+func (pb *PacketBuffer) WriteJsonTextComponent(tc TextComponent) error {
+	data, err := json.Marshal(tc)
+	if err != nil {
+		return err
+	}
+	return pb.WriteString(String(data))
 }
