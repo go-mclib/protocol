@@ -124,6 +124,25 @@ func (c *TCPClient) WritePacket(p Packet) error {
 	return nil
 }
 
+// WriteWirePacket writes a raw WirePacket to the connection.
+// Safe for concurrent use from multiple goroutines.
+func (c *TCPClient) WriteWirePacket(pkt *WirePacket) error {
+	if c.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	c.debugf("-> send (wire): id=0x%02X data_len=%d", int(pkt.PacketID), len(pkt.Data))
+
+	if err := pkt.WriteTo(c.conn, c.compressionThreshold); err != nil {
+		return fmt.Errorf("failed to write wire packet: %w", err)
+	}
+
+	return nil
+}
+
 // ReadWirePacket reads a raw WirePacket from the connection.
 func (c *TCPClient) ReadWirePacket() (*WirePacket, error) {
 	if c.conn == nil {
