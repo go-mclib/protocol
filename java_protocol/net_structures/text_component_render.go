@@ -7,6 +7,11 @@ import (
 
 // TODO: support hex color coded, add "From" methods, e.g. FromMiniMessage
 
+// TranslateFunc resolves translation keys to format patterns (e.g. "%s joined the game").
+// Set automatically by importing the lang package from go-mclib/data.
+// When nil, translate keys are rendered as-is.
+var TranslateFunc func(key string) string
+
 // MC color name -> ANSI escape code
 var mcColorToANSI = map[string]string{
 	"black":        "\033[30m",
@@ -47,8 +52,95 @@ var mcColorToCode = map[string]string{
 	"white":        "§f",
 }
 
+// componentWriter writes a single component's full content (content + extras) to b.
+type componentWriter func(tc *TextComponent, b *strings.Builder)
+
+// writeContent writes the resolved content of this component (without extras).
+// If TranslateFunc is set and the component has a translate key, the key is
+// resolved and %s / %N$s placeholders are substituted with With args rendered
+// via the provided writer. Otherwise the raw text/key is written.
+func (tc *TextComponent) writeContent(b *strings.Builder, write componentWriter) {
+	if tc.Translate != "" {
+		if TranslateFunc != nil {
+			if pattern := TranslateFunc(tc.Translate); pattern != "" {
+				writeFormatted(b, pattern, tc.With, write)
+				return
+			}
+		}
+		// no translation available, show key + with args as-is
+		b.WriteString(tc.Translate)
+		for i := range tc.With {
+			write(&tc.With[i], b)
+		}
+		return
+	}
+
+	b.WriteString(tc.Text)
+	b.WriteString(tc.Keybind)
+	if tc.Score != nil {
+		b.WriteString(tc.Score.Name)
+	}
+	b.WriteString(tc.Selector)
+}
+
+// writeFormatted handles MC's Java-style format strings (%s, %1$s, %%, %d).
+func writeFormatted(b *strings.Builder, pattern string, args []TextComponent, write componentWriter) {
+	seqIdx := 0
+	i := 0
+	for i < len(pattern) {
+		if pattern[i] != '%' || i+1 >= len(pattern) {
+			b.WriteByte(pattern[i])
+			i++
+			continue
+		}
+
+		j := i + 1
+
+		// %%
+		if pattern[j] == '%' {
+			b.WriteByte('%')
+			i = j + 1
+			continue
+		}
+
+		// %N$s (positional)
+		if j+2 < len(pattern) && pattern[j] >= '1' && pattern[j] <= '9' && pattern[j+1] == '$' && pattern[j+2] == 's' {
+			argIdx := int(pattern[j]-'0') - 1
+			if argIdx >= 0 && argIdx < len(args) {
+				write(&args[argIdx], b)
+			}
+			i = j + 3
+			continue
+		}
+
+		// %s
+		if pattern[j] == 's' {
+			if seqIdx < len(args) {
+				write(&args[seqIdx], b)
+				seqIdx++
+			}
+			i = j + 1
+			continue
+		}
+
+		// %d
+		if pattern[j] == 'd' {
+			if seqIdx < len(args) {
+				write(&args[seqIdx], b)
+				seqIdx++
+			}
+			i = j + 1
+			continue
+		}
+
+		// unknown format specifier, output literally
+		fmt.Fprintf(b, "%%%c", pattern[j])
+		i = j + 1
+	}
+}
+
 // String returns the plain text content of the component and all children,
-// with no formatting. Translate keys are included as-is.
+// with no formatting. Translate keys are resolved if TranslateFunc is set.
 func (tc TextComponent) String() string {
 	var b strings.Builder
 	tc.writePlain(&b)
@@ -56,19 +148,9 @@ func (tc TextComponent) String() string {
 }
 
 func (tc *TextComponent) writePlain(b *strings.Builder) {
-	b.WriteString(tc.Text)
-	b.WriteString(tc.Translate)
-	b.WriteString(tc.Keybind)
-	if tc.Score != nil {
-		b.WriteString(tc.Score.Name)
-	}
-	b.WriteString(tc.Selector)
-
-	for _, child := range tc.With {
-		child.writePlain(b)
-	}
-	for _, child := range tc.Extra {
-		child.writePlain(b)
+	tc.writeContent(b, (*TextComponent).writePlain)
+	for i := range tc.Extra {
+		tc.Extra[i].writePlain(b)
 	}
 }
 
@@ -88,25 +170,18 @@ func (tc *TextComponent) writeANSI(b *strings.Builder) bool {
 		b.WriteString(prefix)
 	}
 
-	b.WriteString(tc.Text)
-	b.WriteString(tc.Translate)
-	b.WriteString(tc.Keybind)
-	if tc.Score != nil {
-		b.WriteString(tc.Score.Name)
-	}
-	b.WriteString(tc.Selector)
-
-	for _, child := range tc.With {
+	tc.writeContent(b, func(child *TextComponent, b *strings.Builder) {
 		if child.writeANSI(b) {
 			styled = true
 		}
-	}
-	for _, child := range tc.Extra {
+	})
+
+	for i := range tc.Extra {
 		// reset before each styled child so parent style doesn't bleed
 		if styled {
 			b.WriteString("\033[0m")
 		}
-		if child.writeANSI(b) {
+		if tc.Extra[i].writeANSI(b) {
 			styled = true
 		}
 	}
@@ -174,19 +249,9 @@ func (tc *TextComponent) writeColorCodes(b *strings.Builder) {
 		b.WriteString("§k")
 	}
 
-	b.WriteString(tc.Text)
-	b.WriteString(tc.Translate)
-	b.WriteString(tc.Keybind)
-	if tc.Score != nil {
-		b.WriteString(tc.Score.Name)
-	}
-	b.WriteString(tc.Selector)
-
-	for _, child := range tc.With {
-		child.writeColorCodes(b)
-	}
-	for _, child := range tc.Extra {
-		child.writeColorCodes(b)
+	tc.writeContent(b, (*TextComponent).writeColorCodes)
+	for i := range tc.Extra {
+		tc.Extra[i].writeColorCodes(b)
 	}
 }
 
