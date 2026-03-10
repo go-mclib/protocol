@@ -77,6 +77,17 @@ type WirePacket struct {
 	Data ns.ByteArray
 }
 
+// Clone returns a deep copy of the wire packet.
+func (w *WirePacket) Clone() *WirePacket {
+	data := make([]byte, len(w.Data))
+	copy(data, w.Data)
+	return &WirePacket{
+		Length:   w.Length,
+		PacketID: w.PacketID,
+		Data:     data,
+	}
+}
+
 // ReadWirePacketFrom reads a WirePacket from the given reader.
 // Handles both compressed and uncompressed packet formats based on compressionThreshold.
 // Use compressionThreshold < 0 to disable compression.
