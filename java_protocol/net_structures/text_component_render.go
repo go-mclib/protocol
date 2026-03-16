@@ -5,13 +5,6 @@ import (
 	"strings"
 )
 
-// TODO: support hex color coded, add "From" methods, e.g. FromMiniMessage
-
-// TranslateFunc resolves translation keys to format patterns (e.g. "%s joined the game").
-// Set automatically by importing the lang package from go-mclib/data.
-// When nil, translate keys are rendered as-is.
-var TranslateFunc func(key string) string
-
 // MC color name -> ANSI escape code
 var mcColorToANSI = map[string]string{
 	"black":        "\033[30m",
@@ -56,13 +49,13 @@ var mcColorToCode = map[string]string{
 type componentWriter func(tc *TextComponent, b *strings.Builder)
 
 // writeContent writes the resolved content of this component (without extras).
-// If TranslateFunc is set and the component has a translate key, the key is
+// If translate is non-nil and the component has a translate key, the key is
 // resolved and %s / %N$s placeholders are substituted with With args rendered
 // via the provided writer. Otherwise the raw text/key is written.
-func (tc *TextComponent) writeContent(b *strings.Builder, write componentWriter) {
+func (tc *TextComponent) writeContent(b *strings.Builder, write componentWriter, translate func(string) string) {
 	if tc.Translate != "" {
-		if TranslateFunc != nil {
-			if pattern := TranslateFunc(tc.Translate); pattern != "" {
+		if translate != nil {
+			if pattern := translate(tc.Translate); pattern != "" {
 				writeFormatted(b, pattern, tc.With, write)
 				return
 			}
@@ -140,30 +133,43 @@ func writeFormatted(b *strings.Builder, pattern string, args []TextComponent, wr
 }
 
 // String returns the plain text content of the component and all children,
-// with no formatting. Translate keys are resolved if TranslateFunc is set.
+// with no formatting. Translate keys are shown as-is.
 func (tc TextComponent) String() string {
+	return tc.Render(nil)
+}
+
+// Render returns the plain text with translate keys resolved by fn (if non-nil).
+func (tc TextComponent) Render(translate func(string) string) string {
 	var b strings.Builder
-	tc.writePlain(&b)
+	tc.writePlain(&b, translate)
 	return b.String()
 }
 
-func (tc *TextComponent) writePlain(b *strings.Builder) {
-	tc.writeContent(b, (*TextComponent).writePlain)
+func (tc *TextComponent) writePlain(b *strings.Builder, translate func(string) string) {
+	tc.writeContent(b, func(child *TextComponent, b *strings.Builder) {
+		child.writePlain(b, translate)
+	}, translate)
 	for i := range tc.Extra {
-		tc.Extra[i].writePlain(b)
+		tc.Extra[i].writePlain(b, translate)
 	}
 }
 
 // ANSI returns the text with ANSI terminal escape codes for colors and formatting.
+// Translate keys are shown as-is.
 func (tc TextComponent) ANSI() string {
+	return tc.RenderANSI(nil)
+}
+
+// RenderANSI returns ANSI-formatted text with translate keys resolved by fn (if non-nil).
+func (tc TextComponent) RenderANSI(translate func(string) string) string {
 	var b strings.Builder
-	if tc.writeANSI(&b) {
+	if tc.writeANSI(&b, translate) {
 		b.WriteString("\033[0m")
 	}
 	return b.String()
 }
 
-func (tc *TextComponent) writeANSI(b *strings.Builder) bool {
+func (tc *TextComponent) writeANSI(b *strings.Builder, translate func(string) string) bool {
 	prefix := tc.ansiPrefix()
 	styled := prefix != ""
 	if styled {
@@ -171,17 +177,17 @@ func (tc *TextComponent) writeANSI(b *strings.Builder) bool {
 	}
 
 	tc.writeContent(b, func(child *TextComponent, b *strings.Builder) {
-		if child.writeANSI(b) {
+		if child.writeANSI(b, translate) {
 			styled = true
 		}
-	})
+	}, translate)
 
 	for i := range tc.Extra {
 		// reset before each styled child so parent style doesn't bleed
 		if styled {
 			b.WriteString("\033[0m")
 		}
-		if tc.Extra[i].writeANSI(b) {
+		if tc.Extra[i].writeANSI(b, translate) {
 			styled = true
 		}
 	}
@@ -221,13 +227,19 @@ func (tc *TextComponent) ansiPrefix() string {
 }
 
 // ColorCodes returns the text with Bukkit-style section sign (§) color codes.
+// Translate keys are shown as-is.
 func (tc TextComponent) ColorCodes() string {
+	return tc.RenderColorCodes(nil)
+}
+
+// RenderColorCodes returns section-sign colored text with translate keys resolved by fn (if non-nil).
+func (tc TextComponent) RenderColorCodes(translate func(string) string) string {
 	var b strings.Builder
-	tc.writeColorCodes(&b)
+	tc.writeColorCodes(&b, translate)
 	return b.String()
 }
 
-func (tc *TextComponent) writeColorCodes(b *strings.Builder) {
+func (tc *TextComponent) writeColorCodes(b *strings.Builder, translate func(string) string) {
 	if tc.Color != "" {
 		if code, ok := mcColorToCode[tc.Color]; ok {
 			b.WriteString(code)
@@ -249,20 +261,28 @@ func (tc *TextComponent) writeColorCodes(b *strings.Builder) {
 		b.WriteString("§k")
 	}
 
-	tc.writeContent(b, (*TextComponent).writeColorCodes)
+	tc.writeContent(b, func(child *TextComponent, b *strings.Builder) {
+		child.writeColorCodes(b, translate)
+	}, translate)
 	for i := range tc.Extra {
-		tc.Extra[i].writeColorCodes(b)
+		tc.Extra[i].writeColorCodes(b, translate)
 	}
 }
 
 // MiniMessage returns the text in Adventure MiniMessage format.
+// Translate keys are shown as-is.
 func (tc TextComponent) MiniMessage() string {
+	return tc.RenderMiniMessage(nil)
+}
+
+// RenderMiniMessage returns MiniMessage-formatted text with translate keys resolved by fn (if non-nil).
+func (tc TextComponent) RenderMiniMessage(translate func(string) string) string {
 	var b strings.Builder
-	tc.writeMiniMessage(&b)
+	tc.writeMiniMessage(&b, translate)
 	return b.String()
 }
 
-func (tc *TextComponent) writeMiniMessage(b *strings.Builder) {
+func (tc *TextComponent) writeMiniMessage(b *strings.Builder, translate func(string) string) {
 	var tags []string
 
 	if tc.Color != "" {
@@ -295,7 +315,7 @@ func (tc *TextComponent) writeMiniMessage(b *strings.Builder) {
 		b.WriteString(tc.Translate)
 		for _, arg := range tc.With {
 			b.WriteByte(':')
-			arg.writeMiniMessage(b)
+			arg.writeMiniMessage(b, translate)
 		}
 		b.WriteByte('>')
 	} else if tc.Keybind != "" {
@@ -311,7 +331,7 @@ func (tc *TextComponent) writeMiniMessage(b *strings.Builder) {
 	}
 
 	for _, child := range tc.Extra {
-		child.writeMiniMessage(b)
+		child.writeMiniMessage(b, translate)
 	}
 
 	// close tags in reverse

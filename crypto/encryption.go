@@ -57,6 +57,14 @@ func (e *Encryption) EncryptWithPublicKey(publicKeyBytes []byte, data []byte) ([
 	return encrypted, nil
 }
 
+func (e *Encryption) DecryptWithPrivateKey(privateKey *rsa.PrivateKey, data []byte) ([]byte, error) {
+	decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt data: %w", err)
+	}
+	return decrypted, nil
+}
+
 func (e *Encryption) EnableEncryption() error {
 	if e.sharedSecret == nil {
 		return fmt.Errorf("shared secret not set")
