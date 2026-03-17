@@ -121,6 +121,12 @@ func (tc *TextComponent) isSimpleText() bool {
 		len(tc.Extra) == 0
 }
 
+// hasContentType returns true if any content type field is non-empty.
+func (tc *TextComponent) hasContentType() bool {
+	return tc.Text != "" || tc.Translate != "" || tc.Keybind != "" ||
+		tc.Score != nil || tc.Selector != "" || tc.NBT != ""
+}
+
 // Encode writes the text component as NBT to the writer.
 // Simple text-only components are encoded as NBT String tags for efficiency.
 func (tc *TextComponent) Encode(buf *PacketBuffer) error {
@@ -128,11 +134,17 @@ func (tc *TextComponent) Encode(buf *PacketBuffer) error {
 	var err error
 
 	if tc.isSimpleText() {
-		// encode as NBT String tag (more compact, less data sent over network)
 		data, err = nbt.Encode(nbt.String(tc.Text), "", true)
 	} else {
-		// encode as NBT Compound tag
-		data, err = nbt.MarshalNetwork(tc)
+		// marshal to NBT tag, then ensure "text" field exists in the compound
+		var tag nbt.Tag
+		tag, err = nbt.MarshalTag(tc)
+		if err == nil {
+			if comp, ok := tag.(nbt.Compound); ok && !tc.hasContentType() {
+				comp["text"] = nbt.String("")
+			}
+			data, err = nbt.EncodeNetwork(tag)
+		}
 	}
 
 	if err != nil {
