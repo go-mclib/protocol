@@ -8,7 +8,7 @@ import (
 )
 
 // ChunkData represents the data portion of chunk packets.
-// Heightmaps are encoded as a VarInt-keyed map of long arrays (protocol 774+).
+// Heightmaps are encoded as a VarInt-keyed map of long arrays.
 // Chunk sections are raw bytes. Block entities follow.
 //
 // Wire format:

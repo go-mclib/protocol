@@ -17,11 +17,11 @@ Also note that this library is not yet stable. The API is subject to change. The
 This project is still in its early stages, so there are no tagged releases yet. You can use the `@<protocol-version>` tag to get a tag for specific protocol version. For example:
 
 ```bash
-# for 1.21.11 (protocol version 774)
-go get github.com/go-mclib/protocol@774
+# for 26.1 (protocol version 775)
+go get github.com/go-mclib/protocol@775
 ```
 
-Replace `774` with the protocol version (tag) you want to use.
+Replace `775` with the protocol version (tag) you want to use.
 
 ## Quick Q&A
 

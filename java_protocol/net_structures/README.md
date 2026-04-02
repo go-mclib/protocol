@@ -2,7 +2,7 @@
 
 Go implementation of Minecraft Java Edition protocol data types.
 
-Based on the [Minecraft Wiki protocol documentation](https://minecraft.wiki/w/Java_Edition_protocol/Data_types) and the decompiled 1.21.11 client source code.
+Based on the [Minecraft Wiki protocol documentation](https://minecraft.wiki/w/Java_Edition_protocol/Data_types) and the decompiled vanilla Java Edition source code.
 
 ## Data Types
 
