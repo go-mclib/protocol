@@ -106,7 +106,7 @@ func (c *SessionServerClient) Join(accessToken, selectedProfile, serverID string
 		return fmt.Errorf("failed to create join request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "gomc-protocol")
+	req.Header.Set("User-Agent", "gomc-lib/protocol (github.com/go-mclib/protocol)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -145,7 +145,7 @@ func (c *SessionServerClient) HasJoined(username, serverID string, ip ...string)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create hasJoined request: %w", err)
 	}
-	req.Header.Set("User-Agent", "gomc-protocol/1.0")
+	req.Header.Set("User-Agent", "gomc-lib/protocol (github.com/go-mclib/protocol)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
