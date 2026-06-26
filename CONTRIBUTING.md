@@ -42,7 +42,7 @@ For packet mappings, see [go-mclib/data](https://github.com/go-mclib/data).
 
 ## Testing
 
-Unit tests are located in separate `_test` packages. Tests validate functionality and packet mappings against actual packet dumps. Run all tests with:
+Unit tests are located in separate `_test` packages and validate the core primitives (NBT, crypto, net structures, session server). Run all tests with:
 
 ```bash
 go test ./...
