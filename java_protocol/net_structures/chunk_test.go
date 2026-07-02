@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/go-mclib/nbt"
 	ns "github.com/go-mclib/protocol/java_protocol/net_structures"
-	"github.com/go-mclib/protocol/nbt"
 )
 
 // BlockEntity wire format:

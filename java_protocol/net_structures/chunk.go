@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/go-mclib/protocol/nbt"
+	"github.com/go-mclib/nbt"
 )
 
 // ChunkData represents the data portion of chunk packets.

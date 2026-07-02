@@ -3,7 +3,7 @@ package net_structures
 import (
 	"encoding/json"
 
-	"github.com/go-mclib/protocol/nbt"
+	"github.com/go-mclib/nbt"
 )
 
 // TextComponent represents a Minecraft text component.
