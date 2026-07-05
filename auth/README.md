@@ -186,23 +186,6 @@ client := auth.NewClient(auth.AuthClientConfig{
 })
 ```
 
-### Managing Multiple Accounts
-
-```go
-// list cached accounts
-accounts, _ := client.ListCachedAccounts()
-for _, username := range accounts {
-    fmt.Println(username)
-}
-
-// switch account
-client.SetUsername("OtherPlayer")
-loginData, _ := client.Login(ctx)
-
-// clear cached token for current username/account
-client.ClearCachedToken(ctx)
-```
-
 ### Fetching Mojang Certificates
 
 For chat message signing (1.19+), you need Mojang-issued certificates. To do this, you need to have the access token of the account you want to sign messages for.

@@ -70,16 +70,6 @@ func (e ErrorResponse) String() string {
 	return fmt.Sprintf("%s (path: %s)", e.Error, e.Path)
 }
 
-// NewClientWithURL creates a new session server client with a custom base URL
-func NewClientWithURL(baseURL string) *SessionServerClient {
-	return &SessionServerClient{
-		baseURL: baseURL,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-	}
-}
-
 // Join authenticates a client session with the session server
 func (c *SessionServerClient) Join(accessToken, selectedProfile, serverID string, sharedSecret, publicKey []byte) error {
 	if !ValidateAccessToken(accessToken) {
@@ -120,7 +110,6 @@ func (c *SessionServerClient) Join(accessToken, selectedProfile, serverID string
 	}
 
 	if resp.StatusCode == 204 {
-		// success
 		return nil
 	}
 
@@ -159,7 +148,6 @@ func (c *SessionServerClient) HasJoined(username, serverID string, ip ...string)
 	}
 
 	if resp.StatusCode == 204 {
-		// user hasn't joined or session expired
 		return nil, nil
 	}
 

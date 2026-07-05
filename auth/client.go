@@ -38,28 +38,6 @@ type LoginData struct {
 	ExpiresAt    time.Time
 }
 
-// ToSession converts LoginData to a CachedSession for storage.
-func (d LoginData) ToSession() *CachedSession {
-	return &CachedSession{
-		AccessToken:  d.AccessToken,
-		RefreshToken: d.RefreshToken,
-		UUID:         d.UUID,
-		Username:     d.Username,
-		ExpiresAt:    d.ExpiresAt,
-	}
-}
-
-// FromSession creates LoginData from a CachedSession.
-func FromSession(s *CachedSession) LoginData {
-	return LoginData{
-		AccessToken:  s.AccessToken,
-		RefreshToken: s.RefreshToken,
-		UUID:         s.UUID,
-		Username:     s.Username,
-		ExpiresAt:    s.ExpiresAt,
-	}
-}
-
 // NewClient creates a new AuthClient with the given configuration
 func NewClient(cfg AuthClientConfig) *AuthClient {
 	if cfg.RedirectPort == 0 {
@@ -210,14 +188,14 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 			// check if session is still valid (access token not expired)
 			if session.IsValid() {
 				c.username = session.Username
-				return FromSession(session), nil
+				return fromSession(session), nil
 			}
 
 			// session expired but we have a refresh token - try to refresh
 			if session.RefreshToken != "" {
 				if data, err := c.LoginWithRefreshToken(ctx, session.RefreshToken); err == nil {
 					c.username = data.Username
-					_ = store.SaveSession(data.ToSession())
+					_ = store.SaveSession(data.toSession())
 					return data, nil
 				}
 			}
@@ -238,30 +216,10 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 	// save session with the username from login response
 	c.username = data.Username
 	if store != nil {
-		_ = store.SaveSession(data.ToSession())
+		_ = store.SaveSession(data.toSession())
 	}
 
 	return data, nil
-}
-
-// ClearCachedToken removes the stored refresh token for the current username.
-// If username is not set, this returns an error.
-func (c *AuthClient) ClearCachedToken(_ context.Context) error {
-	if c.tokenStore == nil {
-		return nil
-	}
-
-	if c.username == "" {
-		return errors.New("no username set, cannot clear cached token")
-	}
-
-	return c.tokenStore.Clear(c.username)
-}
-
-// SetUsername updates the username for this client. This affects which cached
-// token is loaded/saved.
-func (c *AuthClient) SetUsername(username string) {
-	c.username = username
 }
 
 // GetUsername returns the current username for this client.
@@ -269,12 +227,24 @@ func (c *AuthClient) GetUsername() string {
 	return c.username
 }
 
-// ListCachedAccounts returns a list of all usernames that have cached tokens.
-func (c *AuthClient) ListCachedAccounts() ([]string, error) {
-	if c.tokenStore == nil {
-		return nil, nil
+func (d LoginData) toSession() *CachedSession {
+	return &CachedSession{
+		AccessToken:  d.AccessToken,
+		RefreshToken: d.RefreshToken,
+		UUID:         d.UUID,
+		Username:     d.Username,
+		ExpiresAt:    d.ExpiresAt,
 	}
-	return c.tokenStore.ListAccounts()
+}
+
+func fromSession(s *CachedSession) LoginData {
+	return LoginData{
+		AccessToken:  s.AccessToken,
+		RefreshToken: s.RefreshToken,
+		UUID:         s.UUID,
+		Username:     s.Username,
+		ExpiresAt:    s.ExpiresAt,
+	}
 }
 
 // tryPort tries to find an open port

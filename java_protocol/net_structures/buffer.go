@@ -6,6 +6,9 @@ import (
 	"io"
 )
 
+// ByteArray is a raw byte sequence used throughout the protocol.
+type ByteArray = []byte
+
 // PacketBuffer provides methods for reading and writing Minecraft protocol data types.
 // It wraps io.Reader and io.Writer interfaces for streaming network communication.
 type PacketBuffer struct {
@@ -69,8 +72,6 @@ func (pb *PacketBuffer) Reset() {
 	}
 }
 
-// --- Raw I/O ---
-
 // Read reads exactly len(p) bytes from the buffer.
 func (pb *PacketBuffer) Read(p []byte) (int, error) {
 	if pb.reader == nil {
@@ -110,8 +111,6 @@ func (pb *PacketBuffer) Writer() io.Writer {
 	return pb.writer
 }
 
-// --- VarInt ---
-
 // ReadVarInt reads a variable-length 32-bit integer.
 func (pb *PacketBuffer) ReadVarInt() (VarInt, error) {
 	return DecodeVarInt(pb.reader)
@@ -122,8 +121,6 @@ func (pb *PacketBuffer) WriteVarInt(v VarInt) error {
 	return v.Encode(pb.writer)
 }
 
-// --- VarLong ---
-
 // ReadVarLong reads a variable-length 64-bit integer.
 func (pb *PacketBuffer) ReadVarLong() (VarLong, error) {
 	return DecodeVarLong(pb.reader)
@@ -133,8 +130,6 @@ func (pb *PacketBuffer) ReadVarLong() (VarLong, error) {
 func (pb *PacketBuffer) WriteVarLong(v VarLong) error {
 	return v.Encode(pb.writer)
 }
-
-// --- Fixed-width integers (Big Endian) ---
 
 // ReadBool reads a boolean (1 byte: 0x00 = false, 0x01 = true).
 func (pb *PacketBuffer) ReadBool() (Boolean, error) {
@@ -206,8 +201,6 @@ func (pb *PacketBuffer) WriteInt64(v Int64) error {
 	return v.Encode(pb.writer)
 }
 
-// --- Floating point (Big Endian IEEE 754) ---
-
 // ReadFloat32 reads a big-endian 32-bit IEEE 754 float.
 func (pb *PacketBuffer) ReadFloat32() (Float32, error) {
 	return DecodeFloat32(pb.reader)
@@ -228,8 +221,6 @@ func (pb *PacketBuffer) WriteFloat64(v Float64) error {
 	return v.Encode(pb.writer)
 }
 
-// --- String ---
-
 // ReadString reads a UTF-8 string with VarInt length prefix.
 // maxLen is the maximum allowed string length in characters (usually 32767, 0 means no limit).
 func (pb *PacketBuffer) ReadString(maxLen int) (String, error) {
@@ -241,8 +232,6 @@ func (pb *PacketBuffer) WriteString(v String) error {
 	return v.Encode(pb.writer)
 }
 
-// --- Identifier ---
-
 // ReadIdentifier reads a Minecraft identifier (namespaced ID).
 func (pb *PacketBuffer) ReadIdentifier() (Identifier, error) {
 	return DecodeIdentifier(pb.reader)
@@ -252,8 +241,6 @@ func (pb *PacketBuffer) ReadIdentifier() (Identifier, error) {
 func (pb *PacketBuffer) WriteIdentifier(v Identifier) error {
 	return v.Encode(pb.writer)
 }
-
-// --- Byte Array ---
 
 // ReadByteArray reads a byte array with VarInt length prefix.
 func (pb *PacketBuffer) ReadByteArray(maxLen int) (ByteArray, error) {
@@ -304,8 +291,6 @@ func (pb *PacketBuffer) WriteFixedByteArray(v ByteArray) error {
 	return err
 }
 
-// --- Position (BlockPos) ---
-
 // ReadPosition reads a block position packed into a 64-bit integer.
 func (pb *PacketBuffer) ReadPosition() (Position, error) {
 	return DecodePosition(pb.reader)
@@ -315,8 +300,6 @@ func (pb *PacketBuffer) ReadPosition() (Position, error) {
 func (pb *PacketBuffer) WritePosition(v Position) error {
 	return v.Encode(pb.writer)
 }
-
-// --- GlobalPos ---
 
 // ReadGlobalPos reads a global position (dimension + block position).
 func (pb *PacketBuffer) ReadGlobalPos() (GlobalPos, error) {
@@ -328,8 +311,6 @@ func (pb *PacketBuffer) WriteGlobalPos(v GlobalPos) error {
 	return v.Encode(pb.writer)
 }
 
-// --- UUID ---
-
 // ReadUUID reads a 128-bit UUID (two 64-bit integers).
 func (pb *PacketBuffer) ReadUUID() (UUID, error) {
 	return DecodeUUID(pb.reader)
@@ -340,8 +321,6 @@ func (pb *PacketBuffer) WriteUUID(v UUID) error {
 	return v.Encode(pb.writer)
 }
 
-// --- Angle ---
-
 // ReadAngle reads a rotation angle (1 byte = 1/256 of a full turn).
 func (pb *PacketBuffer) ReadAngle() (Angle, error) {
 	return DecodeAngle(pb.reader)
@@ -351,8 +330,6 @@ func (pb *PacketBuffer) ReadAngle() (Angle, error) {
 func (pb *PacketBuffer) WriteAngle(v Angle) error {
 	return v.Encode(pb.writer)
 }
-
-// --- Copy methods for primitives (read from source, write to this buffer) ---
 
 // CopyVarInt copies a VarInt from src to this buffer.
 func (pb *PacketBuffer) CopyVarInt(src *PacketBuffer) error {
@@ -390,15 +367,6 @@ func (pb *PacketBuffer) CopyInt8(src *PacketBuffer) error {
 	return pb.WriteInt8(v)
 }
 
-// CopyInt16 copies an Int16 from src to this buffer.
-func (pb *PacketBuffer) CopyInt16(src *PacketBuffer) error {
-	v, err := src.ReadInt16()
-	if err != nil {
-		return err
-	}
-	return pb.WriteInt16(v)
-}
-
 // CopyInt32 copies an Int32 from src to this buffer.
 func (pb *PacketBuffer) CopyInt32(src *PacketBuffer) error {
 	v, err := src.ReadInt32()
@@ -408,15 +376,6 @@ func (pb *PacketBuffer) CopyInt32(src *PacketBuffer) error {
 	return pb.WriteInt32(v)
 }
 
-// CopyInt64 copies an Int64 from src to this buffer.
-func (pb *PacketBuffer) CopyInt64(src *PacketBuffer) error {
-	v, err := src.ReadInt64()
-	if err != nil {
-		return err
-	}
-	return pb.WriteInt64(v)
-}
-
 // CopyFloat32 copies a Float32 from src to this buffer.
 func (pb *PacketBuffer) CopyFloat32(src *PacketBuffer) error {
 	v, err := src.ReadFloat32()
@@ -424,15 +383,6 @@ func (pb *PacketBuffer) CopyFloat32(src *PacketBuffer) error {
 		return err
 	}
 	return pb.WriteFloat32(v)
-}
-
-// CopyFloat64 copies a Float64 from src to this buffer.
-func (pb *PacketBuffer) CopyFloat64(src *PacketBuffer) error {
-	v, err := src.ReadFloat64()
-	if err != nil {
-		return err
-	}
-	return pb.WriteFloat64(v)
 }
 
 // CopyString copies a String from src to this buffer.

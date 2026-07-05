@@ -400,13 +400,11 @@ Text components can be converted to various text formats:
 ```go
 tc := ns.TextComponent{Text: "Hello", Color: "red", Bold: &bold}
 
-tc.String()     // "Hello"                - plain text, no formatting
-tc.ANSI()       // "\033[91m\033[1mHello\033[0m" - ANSI terminal colors
-tc.ColorCodes() // "§c§lHello"            - Bukkit-style § color codes
+tc.String()      // "Hello"                - plain text, no formatting
 tc.MiniMessage() // "<red><bold>Hello</bold></red>" - Adventure MiniMessage
 ```
 
-All renderers recurse into `Extra` and `With` children. `ANSI()` supports named colors, hex colors (`#rrggbb` via 24-bit ANSI), bold, italic, underline, strikethrough, and obfuscated. `MiniMessage()` emits `<lang:key:args>` for translatable components and `<key:name>` for keybinds.
+All renderers recurse into `Extra` and `With` children. `MiniMessage()` emits `<lang:key:args>` for translatable components and `<key:name>` for keybinds.
 
 ### Slot (Item Stack)
 

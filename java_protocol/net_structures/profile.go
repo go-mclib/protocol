@@ -22,12 +22,7 @@ func (p *ProfileProperty) Decode(buf *PacketBuffer) error {
 	if err != nil {
 		return fmt.Errorf("failed to read property value: %w", err)
 	}
-	if err := p.Signature.DecodeWith(buf, func(b *PacketBuffer) (String, error) {
-		return b.ReadString(1024)
-	}); err != nil {
-		return fmt.Errorf("failed to read property signature: %w", err)
-	}
-	return nil
+	return decodeOptional(buf, &p.Signature, "property signature", stringDecoder(1024))
 }
 
 // Encode writes a ProfileProperty to the buffer.
@@ -38,12 +33,7 @@ func (p *ProfileProperty) Encode(buf *PacketBuffer) error {
 	if err := buf.WriteString(p.Value); err != nil {
 		return fmt.Errorf("failed to write property value: %w", err)
 	}
-	if err := p.Signature.EncodeWith(buf, func(b *PacketBuffer, v String) error {
-		return b.WriteString(v)
-	}); err != nil {
-		return fmt.Errorf("failed to write property signature: %w", err)
-	}
-	return nil
+	return encodeOptional(buf, p.Signature, "property signature", (*PacketBuffer).WriteString)
 }
 
 // GameProfile represents a complete player profile with UUID, username, and properties.
@@ -72,11 +62,7 @@ func (p *GameProfile) Decode(buf *PacketBuffer) error {
 	if err != nil {
 		return fmt.Errorf("failed to read profile username: %w", err)
 	}
-	if err := p.Properties.DecodeWith(buf, func(b *PacketBuffer) (ProfileProperty, error) {
-		var prop ProfileProperty
-		err := prop.Decode(b)
-		return prop, err
-	}); err != nil {
+	if err := p.Properties.DecodeWith(buf, decodeProfileProperty); err != nil {
 		return fmt.Errorf("failed to read profile properties: %w", err)
 	}
 	return nil
@@ -90,9 +76,7 @@ func (p *GameProfile) Encode(buf *PacketBuffer) error {
 	if err := buf.WriteString(p.Username); err != nil {
 		return fmt.Errorf("failed to write profile username: %w", err)
 	}
-	if err := p.Properties.EncodeWith(buf, func(b *PacketBuffer, v ProfileProperty) error {
-		return v.Encode(b)
-	}); err != nil {
+	if err := p.Properties.EncodeWith(buf, encodeProfileProperty); err != nil {
 		return fmt.Errorf("failed to write profile properties: %w", err)
 	}
 	return nil
@@ -168,56 +152,34 @@ func (p *ResolvableProfile) Decode(buf *PacketBuffer) error {
 
 	switch p.Kind {
 	case ProfilePartial:
-		if err := p.PartialUsername.DecodeWith(buf, func(b *PacketBuffer) (String, error) {
-			return b.ReadString(16)
-		}); err != nil {
-			return fmt.Errorf("failed to read partial username: %w", err)
+		if err := decodeOptional(buf, &p.PartialUsername, "partial username", stringDecoder(16)); err != nil {
+			return err
 		}
-		if err := p.PartialUUID.DecodeWith(buf, func(b *PacketBuffer) (UUID, error) {
-			return b.ReadUUID()
-		}); err != nil {
-			return fmt.Errorf("failed to read partial uuid: %w", err)
+		if err := decodeOptional(buf, &p.PartialUUID, "partial uuid", (*PacketBuffer).ReadUUID); err != nil {
+			return err
 		}
-		if err := p.PartialProperties.DecodeWith(buf, func(b *PacketBuffer) (PrefixedArray[ProfileProperty], error) {
-			var props PrefixedArray[ProfileProperty]
-			err := props.DecodeWith(b, func(b2 *PacketBuffer) (ProfileProperty, error) {
-				var prop ProfileProperty
-				err := prop.Decode(b2)
-				return prop, err
-			})
-			return props, err
-		}); err != nil {
-			return fmt.Errorf("failed to read partial properties: %w", err)
+		if err := decodeOptional(buf, &p.PartialProperties, "partial properties", decodeProfileProperties); err != nil {
+			return err
 		}
-		if err := p.PartialSignature.DecodeWith(buf, func(b *PacketBuffer) (String, error) {
-			return b.ReadString(1024)
-		}); err != nil {
-			return fmt.Errorf("failed to read partial signature: %w", err)
+		if err := decodeOptional(buf, &p.PartialSignature, "partial signature", stringDecoder(1024)); err != nil {
+			return err
 		}
 
 	case ProfileComplete:
 		if err := p.CompleteProfile.Decode(buf); err != nil {
 			return fmt.Errorf("failed to read complete profile: %w", err)
 		}
-		if err := p.BodyModel.DecodeWith(buf, func(b *PacketBuffer) (Identifier, error) {
-			return b.ReadIdentifier()
-		}); err != nil {
-			return fmt.Errorf("failed to read body model: %w", err)
+		if err := decodeOptional(buf, &p.BodyModel, "body model", (*PacketBuffer).ReadIdentifier); err != nil {
+			return err
 		}
-		if err := p.CapeModel.DecodeWith(buf, func(b *PacketBuffer) (Identifier, error) {
-			return b.ReadIdentifier()
-		}); err != nil {
-			return fmt.Errorf("failed to read cape model: %w", err)
+		if err := decodeOptional(buf, &p.CapeModel, "cape model", (*PacketBuffer).ReadIdentifier); err != nil {
+			return err
 		}
-		if err := p.ElytraModel.DecodeWith(buf, func(b *PacketBuffer) (Identifier, error) {
-			return b.ReadIdentifier()
-		}); err != nil {
-			return fmt.Errorf("failed to read elytra model: %w", err)
+		if err := decodeOptional(buf, &p.ElytraModel, "elytra model", (*PacketBuffer).ReadIdentifier); err != nil {
+			return err
 		}
-		if err := p.SkinModel.DecodeWith(buf, func(b *PacketBuffer) (VarInt, error) {
-			return b.ReadVarInt()
-		}); err != nil {
-			return fmt.Errorf("failed to read skin model: %w", err)
+		if err := decodeOptional(buf, &p.SkinModel, "skin model", (*PacketBuffer).ReadVarInt); err != nil {
+			return err
 		}
 
 	default:
@@ -234,52 +196,34 @@ func (p *ResolvableProfile) Encode(buf *PacketBuffer) error {
 
 	switch p.Kind {
 	case ProfilePartial:
-		if err := p.PartialUsername.EncodeWith(buf, func(b *PacketBuffer, v String) error {
-			return b.WriteString(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write partial username: %w", err)
+		if err := encodeOptional(buf, p.PartialUsername, "partial username", (*PacketBuffer).WriteString); err != nil {
+			return err
 		}
-		if err := p.PartialUUID.EncodeWith(buf, func(b *PacketBuffer, v UUID) error {
-			return b.WriteUUID(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write partial uuid: %w", err)
+		if err := encodeOptional(buf, p.PartialUUID, "partial uuid", (*PacketBuffer).WriteUUID); err != nil {
+			return err
 		}
-		if err := p.PartialProperties.EncodeWith(buf, func(b *PacketBuffer, v PrefixedArray[ProfileProperty]) error {
-			return v.EncodeWith(b, func(b2 *PacketBuffer, prop ProfileProperty) error {
-				return prop.Encode(b2)
-			})
-		}); err != nil {
-			return fmt.Errorf("failed to write partial properties: %w", err)
+		if err := encodeOptional(buf, p.PartialProperties, "partial properties", encodeProfileProperties); err != nil {
+			return err
 		}
-		if err := p.PartialSignature.EncodeWith(buf, func(b *PacketBuffer, v String) error {
-			return b.WriteString(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write partial signature: %w", err)
+		if err := encodeOptional(buf, p.PartialSignature, "partial signature", (*PacketBuffer).WriteString); err != nil {
+			return err
 		}
 
 	case ProfileComplete:
 		if err := p.CompleteProfile.Encode(buf); err != nil {
 			return fmt.Errorf("failed to write complete profile: %w", err)
 		}
-		if err := p.BodyModel.EncodeWith(buf, func(b *PacketBuffer, v Identifier) error {
-			return b.WriteIdentifier(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write body model: %w", err)
+		if err := encodeOptional(buf, p.BodyModel, "body model", (*PacketBuffer).WriteIdentifier); err != nil {
+			return err
 		}
-		if err := p.CapeModel.EncodeWith(buf, func(b *PacketBuffer, v Identifier) error {
-			return b.WriteIdentifier(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write cape model: %w", err)
+		if err := encodeOptional(buf, p.CapeModel, "cape model", (*PacketBuffer).WriteIdentifier); err != nil {
+			return err
 		}
-		if err := p.ElytraModel.EncodeWith(buf, func(b *PacketBuffer, v Identifier) error {
-			return b.WriteIdentifier(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write elytra model: %w", err)
+		if err := encodeOptional(buf, p.ElytraModel, "elytra model", (*PacketBuffer).WriteIdentifier); err != nil {
+			return err
 		}
-		if err := p.SkinModel.EncodeWith(buf, func(b *PacketBuffer, v VarInt) error {
-			return b.WriteVarInt(v)
-		}); err != nil {
-			return fmt.Errorf("failed to write skin model: %w", err)
+		if err := encodeOptional(buf, p.SkinModel, "skin model", (*PacketBuffer).WriteVarInt); err != nil {
+			return err
 		}
 
 	default:
@@ -298,4 +242,44 @@ func (pb *PacketBuffer) ReadResolvableProfile() (ResolvableProfile, error) {
 // WriteResolvableProfile writes a ResolvableProfile to the buffer.
 func (pb *PacketBuffer) WriteResolvableProfile(p ResolvableProfile) error {
 	return p.Encode(pb)
+}
+
+// decodeOptional reads a boolean-prefixed optional field, wrapping errors with the field name.
+func decodeOptional[T any](buf *PacketBuffer, o *PrefixedOptional[T], field string, decode ElementDecoder[T]) error {
+	if err := o.DecodeWith(buf, decode); err != nil {
+		return fmt.Errorf("failed to read %s: %w", field, err)
+	}
+	return nil
+}
+
+// encodeOptional writes a boolean-prefixed optional field, wrapping errors with the field name.
+func encodeOptional[T any](buf *PacketBuffer, o PrefixedOptional[T], field string, encode ElementEncoder[T]) error {
+	if err := o.EncodeWith(buf, encode); err != nil {
+		return fmt.Errorf("failed to write %s: %w", field, err)
+	}
+	return nil
+}
+
+func stringDecoder(maxLen int) ElementDecoder[String] {
+	return func(b *PacketBuffer) (String, error) { return b.ReadString(maxLen) }
+}
+
+func decodeProfileProperty(b *PacketBuffer) (ProfileProperty, error) {
+	var prop ProfileProperty
+	err := prop.Decode(b)
+	return prop, err
+}
+
+func encodeProfileProperty(b *PacketBuffer, prop ProfileProperty) error {
+	return prop.Encode(b)
+}
+
+func decodeProfileProperties(b *PacketBuffer) (PrefixedArray[ProfileProperty], error) {
+	var props PrefixedArray[ProfileProperty]
+	err := props.DecodeWith(b, decodeProfileProperty)
+	return props, err
+}
+
+func encodeProfileProperties(b *PacketBuffer, props PrefixedArray[ProfileProperty]) error {
+	return props.EncodeWith(b, encodeProfileProperty)
 }

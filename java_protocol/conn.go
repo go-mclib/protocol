@@ -55,11 +55,6 @@ func (c *Conn) Close() error {
 	return nil
 }
 
-// NetConn returns the underlying net.Conn.
-func (c *Conn) NetConn() net.Conn {
-	return c.conn
-}
-
 // Encryption returns the encryption instance for configuration.
 func (c *Conn) Encryption() *crypto.Encryption {
 	return c.encryption

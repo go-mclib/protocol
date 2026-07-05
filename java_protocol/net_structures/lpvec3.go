@@ -76,13 +76,6 @@ func (v *LpVec3) Decode(buf *PacketBuffer) error {
 	return nil
 }
 
-// lpUnpack maps a 15-bit unsigned value [0, 32766] to [-1.0, +1.0].
-// Matches: Math.min((double)(value & 32767L), 32766.0) * 2.0 / 32766.0 - 1.0
-func lpUnpack(value uint64) float64 {
-	raw := float64(value & lpDataMask)
-	return math.Min(raw, lpMaxQuantize)*2.0/lpMaxQuantize - 1.0
-}
-
 // Encode writes an LpVec3 to the buffer.
 func (v *LpVec3) Encode(buf *PacketBuffer) error {
 	x := lpSanitize(v.X)
@@ -131,6 +124,25 @@ func (v *LpVec3) Encode(buf *PacketBuffer) error {
 	return nil
 }
 
+// ReadLpVec3 reads an LpVec3 from the buffer.
+func (pb *PacketBuffer) ReadLpVec3() (LpVec3, error) {
+	var v LpVec3
+	err := v.Decode(pb)
+	return v, err
+}
+
+// WriteLpVec3 writes an LpVec3 to the buffer.
+func (pb *PacketBuffer) WriteLpVec3(v LpVec3) error {
+	return v.Encode(pb)
+}
+
+// lpUnpack maps a 15-bit unsigned value [0, 32766] to [-1.0, +1.0].
+// Matches: Math.min((double)(value & 32767L), 32766.0) * 2.0 / 32766.0 - 1.0
+func lpUnpack(value uint64) float64 {
+	raw := float64(value & lpDataMask)
+	return math.Min(raw, lpMaxQuantize)*2.0/lpMaxQuantize - 1.0
+}
+
 func lpSanitize(value float64) float64 {
 	if math.IsNaN(value) {
 		return 0
@@ -142,16 +154,4 @@ func lpSanitize(value float64) float64 {
 // Matches: Math.round((value * 0.5 + 0.5) * 32766.0)
 func lpPack(value float64) int64 {
 	return int64(math.Round((value*0.5 + 0.5) * lpMaxQuantize))
-}
-
-// ReadLpVec3 reads an LpVec3 from the buffer.
-func (pb *PacketBuffer) ReadLpVec3() (LpVec3, error) {
-	var v LpVec3
-	err := v.Decode(pb)
-	return v, err
-}
-
-// WriteLpVec3 writes an LpVec3 to the buffer.
-func (pb *PacketBuffer) WriteLpVec3(v LpVec3) error {
-	return v.Encode(pb)
 }

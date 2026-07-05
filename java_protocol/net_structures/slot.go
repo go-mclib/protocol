@@ -65,12 +65,6 @@ type SlotDecoder func(buf *PacketBuffer, componentID VarInt) ([]byte, error)
 // By default, raw bytes are written as-is.
 type SlotEncoder func(buf *PacketBuffer, componentID VarInt, data []byte) error
 
-// defaultSlotEncoder writes raw bytes as-is.
-func defaultSlotEncoder(buf *PacketBuffer, _ VarInt, data []byte) error {
-	_, err := buf.Write(data)
-	return err
-}
-
 // Encode writes the slot to the buffer.
 func (s *Slot) Encode(buf *PacketBuffer) error {
 	return s.EncodeWith(buf, defaultSlotEncoder)
@@ -192,16 +186,6 @@ func (pb *PacketBuffer) WriteSlotWith(s Slot, encode SlotEncoder) error {
 	return s.EncodeWith(pb, encode)
 }
 
-// GetComponent returns the first component with the given ID, or nil if not found.
-func (s *Slot) GetComponent(id VarInt) *RawSlotComponent {
-	for i := range s.Components.Add {
-		if s.Components.Add[i].ID == id {
-			return &s.Components.Add[i]
-		}
-	}
-	return nil
-}
-
 // AddComponent adds a raw component to the slot.
 func (s *Slot) AddComponent(id VarInt, data []byte) {
 	s.Components.Add = append(s.Components.Add, RawSlotComponent{ID: id, Data: data})
@@ -212,49 +196,8 @@ func (s *Slot) RemoveComponent(id VarInt) {
 	s.Components.Remove = append(s.Components.Remove, id)
 }
 
-// CopySlot copies a slot from src to this buffer.
-// This only works for empty slots or slots without component modifications.
-// For slots with components, use ReadSlot with a decoder and WriteSlot.
-func (pb *PacketBuffer) CopySlot(src *PacketBuffer) error {
-	count, err := src.ReadVarInt()
-	if err != nil {
-		return err
-	}
-	if err := pb.WriteVarInt(count); err != nil {
-		return err
-	}
-
-	if count <= 0 {
-		return nil
-	}
-
-	// item ID
-	if err := pb.CopyVarInt(src); err != nil {
-		return err
-	}
-
-	// add count
-	addCount, err := src.ReadVarInt()
-	if err != nil {
-		return err
-	}
-	if err := pb.WriteVarInt(addCount); err != nil {
-		return err
-	}
-
-	// remove count
-	removeCount, err := src.ReadVarInt()
-	if err != nil {
-		return err
-	}
-	if err := pb.WriteVarInt(removeCount); err != nil {
-		return err
-	}
-
-	// component data requires a decoder to know sizes
-	if addCount > 0 || removeCount > 0 {
-		return fmt.Errorf("cannot copy slot with components without decoder; use ReadSlot/WriteSlot")
-	}
-
-	return nil
+// defaultSlotEncoder writes raw bytes as-is.
+func defaultSlotEncoder(buf *PacketBuffer, _ VarInt, data []byte) error {
+	_, err := buf.Write(data)
+	return err
 }

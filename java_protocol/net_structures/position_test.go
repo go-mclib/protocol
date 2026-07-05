@@ -75,7 +75,7 @@ func TestPosition(t *testing.T) {
 	}
 }
 
-func TestPosition_PackUnpack(t *testing.T) {
+func TestPosition_RoundTrip(t *testing.T) {
 	// additional round-trip tests for edge cases
 	positions := []ns.Position{
 		{X: 100, Y: 64, Z: -200},
@@ -84,10 +84,16 @@ func TestPosition_PackUnpack(t *testing.T) {
 	}
 
 	for _, pos := range positions {
-		packed := pos.Pack()
-		decoded := ns.UnpackPosition(packed)
+		buf := ns.NewWriter()
+		if err := buf.WritePosition(pos); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+		decoded, err := ns.NewReader(buf.Bytes()).ReadPosition()
+		if err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
 		if decoded != pos {
-			t.Errorf("round-trip failed: %+v -> 0x%x -> %+v", pos, packed, decoded)
+			t.Errorf("round-trip failed: %+v -> %x -> %+v", pos, buf.Bytes(), decoded)
 		}
 	}
 }

@@ -34,11 +34,9 @@ func (e *Encryption) SetSharedSecret(secret []byte) {
 	e.sharedSecret = secret
 }
 
-func (e *Encryption) GetSharedSecret() []byte {
-	return e.sharedSecret
-}
-
-func (e *Encryption) EncryptWithPublicKey(publicKeyBytes []byte, data []byte) ([]byte, error) {
+// EncryptWithPublicKey RSA-encrypts data with a DER-encoded public key,
+// as used in the login encryption handshake.
+func EncryptWithPublicKey(publicKeyBytes []byte, data []byte) ([]byte, error) {
 	publicKey, err := x509.ParsePKIXPublicKey(publicKeyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse public key: %w", err)
@@ -57,7 +55,8 @@ func (e *Encryption) EncryptWithPublicKey(publicKeyBytes []byte, data []byte) ([
 	return encrypted, nil
 }
 
-func (e *Encryption) DecryptWithPrivateKey(privateKey *rsa.PrivateKey, data []byte) ([]byte, error) {
+// DecryptWithPrivateKey RSA-decrypts login handshake data with the server's key.
+func DecryptWithPrivateKey(privateKey *rsa.PrivateKey, data []byte) ([]byte, error) {
 	decrypted, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt data: %w", err)
@@ -75,8 +74,8 @@ func (e *Encryption) EnableEncryption() error {
 		return fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	e.encryptStream = NewEncryptStream(block, e.sharedSecret)
-	e.decryptStream = NewDecryptStream(block, e.sharedSecret)
+	e.encryptStream = newEncryptStream(block, e.sharedSecret)
+	e.decryptStream = newDecryptStream(block, e.sharedSecret)
 
 	return nil
 }

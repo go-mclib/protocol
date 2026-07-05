@@ -156,14 +156,6 @@ if profile == nil {
 // success! profile.ID contains the verified UUID
 ```
 
-### Custom Session Server
-
-For private servers or testing, you can use a custom mock session server URL:
-
-```go
-client := session_server.NewClientWithURL("https://my-auth-server.example.com")
-```
-
 ## Rate Limits
 
 Mojang's session server is rate limited to approximately 600 requests per 10 minutes. Servers should cache results when possible.

@@ -16,11 +16,6 @@ type Position struct {
 	X, Y, Z int
 }
 
-// NewPosition creates a new Position.
-func NewPosition(x, y, z int) Position {
-	return Position{X: x, Y: y, Z: z}
-}
-
 // Encode writes the Position to w as a packed 64-bit integer.
 func (p Position) Encode(w io.Writer) error {
 	return Int64(p.Pack()).Encode(w)
@@ -32,7 +27,7 @@ func DecodePosition(r io.Reader) (Position, error) {
 	if err != nil {
 		return Position{}, err
 	}
-	return UnpackPosition(int64(val)), nil
+	return unpackPosition(int64(val)), nil
 }
 
 // Pack encodes the position into a 64-bit integer.
@@ -40,28 +35,6 @@ func (p Position) Pack() int64 {
 	return ((int64(p.X) & 0x3FFFFFF) << 38) |
 		((int64(p.Z) & 0x3FFFFFF) << 12) |
 		(int64(p.Y) & 0xFFF)
-}
-
-// UnpackPosition decodes a 64-bit integer into a Position.
-func UnpackPosition(val int64) Position {
-	x := int(val >> 38)
-	z := int(val << 26 >> 38)
-	y := int(val << 52 >> 52)
-
-	// Sign extension for X (26 bits)
-	if x >= 1<<25 {
-		x -= 1 << 26
-	}
-	// Sign extension for Z (26 bits)
-	if z >= 1<<25 {
-		z -= 1 << 26
-	}
-	// Sign extension for Y (12 bits)
-	if y >= 1<<11 {
-		y -= 1 << 12
-	}
-
-	return Position{X: x, Y: y, Z: z}
 }
 
 // GlobalPos represents a position in a specific dimension.
@@ -96,4 +69,24 @@ func DecodeGlobalPos(r io.Reader) (GlobalPos, error) {
 		return GlobalPos{}, err
 	}
 	return GlobalPos{Dimension: dim, Pos: pos}, nil
+}
+
+// unpackPosition decodes a 64-bit integer into a Position, sign-extending
+// the 26-bit x/z and 12-bit y fields.
+func unpackPosition(val int64) Position {
+	x := int(val >> 38)
+	z := int(val << 26 >> 38)
+	y := int(val << 52 >> 52)
+
+	if x >= 1<<25 {
+		x -= 1 << 26
+	}
+	if z >= 1<<25 {
+		z -= 1 << 26
+	}
+	if y >= 1<<11 {
+		y -= 1 << 12
+	}
+
+	return Position{X: x, Y: y, Z: z}
 }

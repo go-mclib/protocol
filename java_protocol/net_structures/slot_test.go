@@ -169,16 +169,3 @@ func slotRemoveEqual(a, b []ns.VarInt) bool {
 	}
 	return true
 }
-
-func TestSlot_GetComponent(t *testing.T) {
-	slot := ns.NewSlot(100, 1)
-	slot.AddComponent(3, []byte{0x32})
-	slot.AddComponent(5, []byte{0x01, 0x02})
-
-	if comp := slot.GetComponent(3); comp == nil || comp.ID != 3 {
-		t.Error("GetComponent(3) failed")
-	}
-	if comp := slot.GetComponent(999); comp != nil {
-		t.Error("GetComponent(999) should return nil")
-	}
-}

@@ -34,54 +34,6 @@ func TestTextComponent_String(t *testing.T) {
 	}
 }
 
-func TestTextComponent_ANSI(t *testing.T) {
-	tc := ns.TextComponent{Text: "Hello", Color: "red"}
-	got := tc.ANSI()
-	if got != "\033[91mHello\033[0m" {
-		t.Errorf("ANSI() = %q, want %q", got, "\033[91mHello\033[0m")
-	}
-
-	// bold
-	tc = ns.TextComponent{Text: "Bold", Bold: boolPtr(true)}
-	got = tc.ANSI()
-	if got != "\033[1mBold\033[0m" {
-		t.Errorf("ANSI() = %q, want %q", got, "\033[1mBold\033[0m")
-	}
-
-	// hex color
-	tc = ns.TextComponent{Text: "Hex", Color: "#ff5555"}
-	got = tc.ANSI()
-	if got != "\033[38;2;255;85;85mHex\033[0m" {
-		t.Errorf("ANSI() = %q, want %q", got, "\033[38;2;255;85;85mHex\033[0m")
-	}
-
-	// no style = no reset
-	tc = ns.TextComponent{Text: "Plain"}
-	got = tc.ANSI()
-	if got != "Plain" {
-		t.Errorf("ANSI() = %q, want %q", got, "Plain")
-	}
-}
-
-func TestTextComponent_ColorCodes(t *testing.T) {
-	tc := ns.TextComponent{Text: "Hello", Color: "green", Bold: boolPtr(true)}
-	got := tc.ColorCodes()
-	if got != "§a§lHello" {
-		t.Errorf("ColorCodes() = %q, want %q", got, "§a§lHello")
-	}
-
-	// with extra
-	tc = ns.TextComponent{
-		Text:  "Hello ",
-		Color: "gold",
-		Extra: []ns.TextComponent{{Text: "World", Color: "red"}},
-	}
-	got = tc.ColorCodes()
-	if got != "§6Hello §cWorld" {
-		t.Errorf("ColorCodes() = %q, want %q", got, "§6Hello §cWorld")
-	}
-}
-
 func TestTextComponent_UnmarshalJSON(t *testing.T) {
 	cases := []struct {
 		name string
@@ -132,5 +84,15 @@ func TestTextComponent_MiniMessage(t *testing.T) {
 	got = tc.MiniMessage()
 	if got != "<gold><bold>wow</bold></gold>" {
 		t.Errorf("MiniMessage() = %q, want %q", got, "<gold><bold>wow</bold></gold>")
+	}
+}
+
+func TestPlainText(t *testing.T) {
+	tc := ns.TextComponent{
+		Text:  "hello ",
+		Extra: []ns.TextComponent{{Text: "world", Color: "red"}},
+	}
+	if tc.PlainText() != "hello world" {
+		t.Errorf("got %q", tc.PlainText())
 	}
 }

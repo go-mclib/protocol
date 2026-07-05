@@ -110,64 +110,6 @@ func ReadWirePacketFrom(r io.Reader, compressionThreshold int) (*WirePacket, err
 	return readUncompressedPacket(reader, packetLength)
 }
 
-func readUncompressedPacket(reader *bytes.Reader, length ns.VarInt) (*WirePacket, error) {
-	packetID, err := ns.DecodeVarInt(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read packet ID: %w", err)
-	}
-
-	remainingData, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read remaining data: %w", err)
-	}
-
-	return &WirePacket{
-		Length:   length,
-		PacketID: packetID,
-		Data:     ns.ByteArray(remainingData),
-	}, nil
-}
-
-func readCompressedPacket(reader *bytes.Reader, length ns.VarInt) (*WirePacket, error) {
-	dataLength, err := ns.DecodeVarInt(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read data length: %w", err)
-	}
-
-	// dataLength == 0 means uncompressed despite compression being enabled
-	if dataLength == 0 {
-		return readUncompressedPacket(reader, length)
-	}
-
-	// uncompress
-	compressedData, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read compressed data: %w", err)
-	}
-	uncompressedData, err := decompressZlib(compressedData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decompress: %w", err)
-	}
-
-	// read uncompressed
-	uncompressedReader := bytes.NewReader(uncompressedData)
-	packetID, err := ns.DecodeVarInt(uncompressedReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read packet ID: %w", err)
-	}
-
-	// remaining data is the packet data
-	remainingData, err := io.ReadAll(uncompressedReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read remaining data: %w", err)
-	}
-	return &WirePacket{
-		Length:   length,
-		PacketID: packetID,
-		Data:     ns.ByteArray(remainingData),
-	}, nil
-}
-
 // WriteTo writes the WirePacket to the given writer.
 // Handles both compressed and uncompressed packet formats based on compressionThreshold.
 // Use compressionThreshold < 0 to disable compression.
@@ -236,6 +178,64 @@ func ToWire(p Packet) (*WirePacket, error) {
 	return &WirePacket{
 		PacketID: p.ID(),
 		Data:     buf.Bytes(),
+	}, nil
+}
+
+func readUncompressedPacket(reader *bytes.Reader, length ns.VarInt) (*WirePacket, error) {
+	packetID, err := ns.DecodeVarInt(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read packet ID: %w", err)
+	}
+
+	remainingData, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remaining data: %w", err)
+	}
+
+	return &WirePacket{
+		Length:   length,
+		PacketID: packetID,
+		Data:     ns.ByteArray(remainingData),
+	}, nil
+}
+
+func readCompressedPacket(reader *bytes.Reader, length ns.VarInt) (*WirePacket, error) {
+	dataLength, err := ns.DecodeVarInt(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data length: %w", err)
+	}
+
+	// dataLength == 0 means uncompressed despite compression being enabled
+	if dataLength == 0 {
+		return readUncompressedPacket(reader, length)
+	}
+
+	// uncompress
+	compressedData, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read compressed data: %w", err)
+	}
+	uncompressedData, err := decompressZlib(compressedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress: %w", err)
+	}
+
+	// read uncompressed
+	uncompressedReader := bytes.NewReader(uncompressedData)
+	packetID, err := ns.DecodeVarInt(uncompressedReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read packet ID: %w", err)
+	}
+
+	// remaining data is the packet data
+	remainingData, err := io.ReadAll(uncompressedReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remaining data: %w", err)
+	}
+	return &WirePacket{
+		Length:   length,
+		PacketID: packetID,
+		Data:     ns.ByteArray(remainingData),
 	}, nil
 }
 

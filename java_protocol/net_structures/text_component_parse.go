@@ -2,11 +2,10 @@ package net_structures
 
 import (
 	"strings"
-	"unicode/utf8"
 )
 
-// reverse lookup: section code char → MC color name
-var codeToMcColor = map[rune]string{
+// color code mappings (§ and & codes)
+var colorCodes = map[byte]string{
 	'0': "black",
 	'1': "dark_blue",
 	'2': "dark_green",
@@ -17,273 +16,251 @@ var codeToMcColor = map[rune]string{
 	'7': "gray",
 	'8': "dark_gray",
 	'9': "blue",
-	'a': "green", 'A': "green",
-	'b': "aqua", 'B': "aqua",
-	'c': "red", 'C': "red",
-	'd': "light_purple", 'D': "light_purple",
-	'e': "yellow", 'E': "yellow",
-	'f': "white", 'F': "white",
+	'a': "green",
+	'b': "aqua",
+	'c': "red",
+	'd': "light_purple",
+	'e': "yellow",
+	'f': "white",
 }
 
-// reverse lookup: MC color name → tag name used in MiniMessage (same for all standard colors)
-var miniMessageColors = map[string]bool{
-	"black": true, "dark_blue": true, "dark_green": true, "dark_aqua": true,
-	"dark_red": true, "dark_purple": true, "gold": true, "gray": true,
-	"dark_gray": true, "blue": true, "green": true, "aqua": true,
-	"red": true, "light_purple": true, "yellow": true, "white": true,
-}
+var boolTrue = true
 
-var miniMessageFormats = map[string]func(tc *TextComponent){
-	"bold":          func(tc *TextComponent) { t := true; tc.Bold = &t },
-	"italic":        func(tc *TextComponent) { t := true; tc.Italic = &t },
-	"underlined":    func(tc *TextComponent) { t := true; tc.Underlined = &t },
-	"strikethrough": func(tc *TextComponent) { t := true; tc.Strikethrough = &t },
-	"obfuscated":    func(tc *TextComponent) { t := true; tc.Obfuscated = &t },
-}
-
-// FromColorCodes parses a string with Bukkit-style section sign (§) color/format codes
+// ParseFormatted parses a string containing legacy color codes (§ or &)
+// and MiniMessage-style tags (<red>, <bold>, <gradient:red:blue>, etc.)
 // into a TextComponent tree.
-//
-//	FromColorCodes("§6Hello §lworld") → gold "Hello " + gold+bold "world"
-func FromColorCodes(s string) TextComponent {
-	root := TextComponent{}
-	var current *TextComponent
-	var buf strings.Builder
+func ParseFormatted(s string) TextComponent {
+	// first pass: normalize § to & for uniform processing
+	s = strings.ReplaceAll(s, "§", "&")
 
-	flush := func() {
-		text := buf.String()
-		buf.Reset()
-		if text == "" {
-			return
-		}
-		if current == nil {
-			if root.Text == "" && len(root.Extra) == 0 {
-				root.Text = text
-				return
-			}
-			root.Extra = append(root.Extra, TextComponent{Text: text})
-			return
-		}
-		current.Text = text
-		root.Extra = append(root.Extra, *current)
-		current = nil
+	// check if string has any formatting
+	if !strings.ContainsAny(s, "&<") {
+		return TextComponent{Text: s}
 	}
 
-	i := 0
-	for i < len(s) {
-		r, size := utf8.DecodeRuneInString(s[i:])
+	// parse MiniMessage tags first, then legacy codes within each segment
+	root := TextComponent{Text: ""}
+	parseMixed(s, &root)
 
-		// check for § followed by a code character
-		if r == '§' && i+size < len(s) {
-			code, codeSize := utf8.DecodeRuneInString(s[i+size:])
-
-			if color, ok := codeToMcColor[code]; ok {
-				// color resets formatting
-				flush()
-				current = &TextComponent{Color: color}
-				i += size + codeSize
-				continue
-			}
-
-			switch code {
-			case 'l', 'L':
-				flush()
-				if current == nil {
-					current = &TextComponent{}
-				}
-				t := true
-				current.Bold = &t
-			case 'o', 'O':
-				flush()
-				if current == nil {
-					current = &TextComponent{}
-				}
-				t := true
-				current.Italic = &t
-			case 'n', 'N':
-				flush()
-				if current == nil {
-					current = &TextComponent{}
-				}
-				t := true
-				current.Underlined = &t
-			case 'm', 'M':
-				flush()
-				if current == nil {
-					current = &TextComponent{}
-				}
-				t := true
-				current.Strikethrough = &t
-			case 'k', 'K':
-				flush()
-				if current == nil {
-					current = &TextComponent{}
-				}
-				t := true
-				current.Obfuscated = &t
-			case 'r', 'R':
-				// reset
-				flush()
-				current = nil
-			default:
-				buf.WriteRune(r)
-				i += size
-				continue
-			}
-			i += size + codeSize
-			continue
-		}
-
-		buf.WriteRune(r)
-		i += size
+	if len(root.Extra) == 1 && root.Text == "" {
+		return root.Extra[0]
 	}
-
-	flush()
 	return root
 }
 
-// FromMiniMessage parses a subset of Adventure MiniMessage format into a TextComponent tree.
-// Supports color tags (<gold>, <#ff0000>), format tags (<bold>, <italic>, etc.),
-// <reset>, and <lang:key:arg1:arg2>.
-//
-//	FromMiniMessage("<gold>Hello <bold>world</bold></gold>")
-func FromMiniMessage(s string) TextComponent {
-	root := TextComponent{}
-	var buf strings.Builder
-
-	type styleFrame struct {
-		tag string
-		tc  TextComponent // style accumulated so far
-	}
-	var stack []styleFrame
-
-	currentStyle := func() TextComponent {
-		var tc TextComponent
-		for _, f := range stack {
-			mergeStyle(&tc, &f.tc)
-		}
-		return tc
-	}
-
-	flush := func() {
-		text := buf.String()
-		buf.Reset()
-		if text == "" {
+// parseMixed handles a string that may contain both <tags> and &codes.
+func parseMixed(s string, parent *TextComponent) {
+	for len(s) > 0 {
+		// find next tag
+		tagStart := strings.Index(s, "<")
+		if tagStart == -1 {
+			// no more tags, parse remaining as legacy
+			parseLegacyCodes(s, parent)
 			return
 		}
-		styled := currentStyle()
-		styled.Text = text
-		if root.Text == "" && len(root.Extra) == 0 && styled.Color == "" && styled.Bold == nil &&
-			styled.Italic == nil && styled.Underlined == nil && styled.Strikethrough == nil && styled.Obfuscated == nil {
-			root.Text = text
-		} else {
-			root.Extra = append(root.Extra, styled)
+
+		// parse legacy codes before the tag
+		if tagStart > 0 {
+			parseLegacyCodes(s[:tagStart], parent)
 		}
-	}
 
-	i := 0
-	for i < len(s) {
-		if s[i] == '<' {
-			end := strings.IndexByte(s[i:], '>')
-			if end == -1 {
-				buf.WriteByte(s[i])
-				i++
-				continue
-			}
+		// find closing >
+		tagEnd := strings.Index(s[tagStart:], ">")
+		if tagEnd == -1 {
+			// malformed tag, treat rest as literal
+			parseLegacyCodes(s[tagStart:], parent)
+			return
+		}
+		tagEnd += tagStart
 
-			tag := s[i+1 : i+end]
-			i += end + 1
+		tagContent := s[tagStart+1 : tagEnd]
+		s = s[tagEnd+1:]
 
-			// closing tag
-			if strings.HasPrefix(tag, "/") {
-				closeTag := tag[1:]
-				flush()
-				// pop matching tag from stack
-				for j := len(stack) - 1; j >= 0; j-- {
-					if stack[j].tag == closeTag {
-						stack = append(stack[:j], stack[j+1:]...)
-						break
-					}
-				}
-				continue
-			}
-
-			// reset
-			if tag == "reset" {
-				flush()
-				stack = nil
-				continue
-			}
-
-			// lang (translate)
-			if strings.HasPrefix(tag, "lang:") {
-				flush()
-				parts := strings.Split(tag[5:], ":")
-				tc := currentStyle()
-				tc.Translate = parts[0]
-				for _, arg := range parts[1:] {
-					tc.With = append(tc.With, TextComponent{Text: arg})
-				}
-				root.Extra = append(root.Extra, tc)
-				continue
-			}
-
-			// hex color
-			if strings.HasPrefix(tag, "#") && len(tag) == 7 {
-				flush()
-				stack = append(stack, styleFrame{tag: tag, tc: TextComponent{Color: tag}})
-				continue
-			}
-
-			// named color
-			if miniMessageColors[tag] {
-				flush()
-				stack = append(stack, styleFrame{tag: tag, tc: TextComponent{Color: tag}})
-				continue
-			}
-
-			// format tag
-			if applyFmt, ok := miniMessageFormats[tag]; ok {
-				flush()
-				var tc TextComponent
-				applyFmt(&tc)
-				stack = append(stack, styleFrame{tag: tag, tc: tc})
-				continue
-			}
-
-			// unknown tag, output literally
-			buf.WriteByte('<')
-			buf.WriteString(tag)
-			buf.WriteByte('>')
+		// check if it's a closing tag
+		if strings.HasPrefix(tagContent, "/") {
+			// closing tag — return to parent (handled by recursion)
 			continue
 		}
 
-		buf.WriteByte(s[i])
+		// find the matching closing tag
+		closingTag := "</" + tagContent + ">"
+		// handle parameterized tags like <gradient:red:blue>
+		baseTag := tagContent
+		if idx := strings.Index(baseTag, ":"); idx != -1 {
+			closingTag = "</" + baseTag[:idx] + ">"
+			baseTag = baseTag[:idx]
+		}
+
+		closeIdx := strings.Index(s, closingTag)
+		var inner string
+		if closeIdx != -1 {
+			inner = s[:closeIdx]
+			s = s[closeIdx+len(closingTag):]
+		} else {
+			// no closing tag — rest of string is content
+			inner = s
+			s = ""
+		}
+
+		child := applyTag(tagContent)
+		parseMixed(inner, &child)
+		parent.Extra = append(parent.Extra, child)
+	}
+}
+
+// applyTag creates a TextComponent with the style for a tag name.
+func applyTag(tag string) TextComponent {
+	tc := TextComponent{Text: ""}
+
+	// handle parameterized tags
+	parts := strings.SplitN(tag, ":", 2)
+	name := strings.ToLower(parts[0])
+
+	switch name {
+	// colors
+	case "black", "dark_blue", "dark_green", "dark_aqua", "dark_red",
+		"dark_purple", "gold", "gray", "dark_gray", "blue", "green",
+		"aqua", "red", "light_purple", "yellow", "white":
+		tc.Color = name
+
+	// formatting
+	case "bold", "b":
+		tc.Bold = &boolTrue
+	case "italic", "i", "em":
+		tc.Italic = &boolTrue
+	case "underlined", "underline", "u":
+		tc.Underlined = &boolTrue
+	case "strikethrough", "st":
+		tc.Strikethrough = &boolTrue
+	case "obfuscated", "obf", "magic":
+		tc.Obfuscated = &boolTrue
+
+	// hex color: <#ff5555> or <color:#ff5555>
+	case "color":
+		if len(parts) > 1 {
+			tc.Color = parts[1]
+		}
+
+	// gradient (simplified: use first color)
+	case "gradient":
+		if len(parts) > 1 {
+			colors := strings.Split(parts[1], ":")
+			if len(colors) > 0 {
+				tc.Color = colors[0]
+			}
+		}
+
+	// reset
+	case "reset":
+		boolFalse := false
+		tc.Color = "white"
+		tc.Bold = &boolFalse
+		tc.Italic = &boolFalse
+		tc.Underlined = &boolFalse
+		tc.Strikethrough = &boolFalse
+		tc.Obfuscated = &boolFalse
+
+	default:
+		// try hex: <#ff5555>
+		if strings.HasPrefix(name, "#") {
+			tc.Color = name
+		}
+	}
+
+	return tc
+}
+
+// parseLegacyCodes parses &-codes in a string and appends segments to parent.
+func parseLegacyCodes(s string, parent *TextComponent) {
+	if !strings.Contains(s, "&") {
+		if s != "" {
+			parent.Extra = append(parent.Extra, TextComponent{Text: s})
+		}
+		return
+	}
+
+	var current TextComponent
+	i := 0
+	for i < len(s) {
+		if s[i] == '&' && i+1 < len(s) {
+			code := toLower(s[i+1])
+
+			// check color code
+			if color, ok := colorCodes[code]; ok {
+				// flush current segment
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+				}
+				current = TextComponent{Color: color}
+				i += 2
+				continue
+			}
+
+			// check formatting codes
+			switch code {
+			case 'l':
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+					current = TextComponent{Color: current.Color}
+				}
+				current.Bold = &boolTrue
+				i += 2
+				continue
+			case 'o':
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+					current = TextComponent{Color: current.Color}
+				}
+				current.Italic = &boolTrue
+				i += 2
+				continue
+			case 'n':
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+					current = TextComponent{Color: current.Color}
+				}
+				current.Underlined = &boolTrue
+				i += 2
+				continue
+			case 'm':
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+					current = TextComponent{Color: current.Color}
+				}
+				current.Strikethrough = &boolTrue
+				i += 2
+				continue
+			case 'k':
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+					current = TextComponent{Color: current.Color}
+				}
+				current.Obfuscated = &boolTrue
+				i += 2
+				continue
+			case 'r':
+				// reset
+				if current.Text != "" {
+					parent.Extra = append(parent.Extra, current)
+				}
+				current = TextComponent{}
+				i += 2
+				continue
+			}
+		}
+
+		current.Text += string(s[i])
 		i++
 	}
 
-	flush()
-	return root
+	if current.Text != "" {
+		parent.Extra = append(parent.Extra, current)
+	}
 }
 
-// mergeStyle copies non-zero style fields from src onto dst.
-func mergeStyle(dst, src *TextComponent) {
-	if src.Color != "" {
-		dst.Color = src.Color
+func toLower(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + 32
 	}
-	if src.Bold != nil {
-		dst.Bold = src.Bold
-	}
-	if src.Italic != nil {
-		dst.Italic = src.Italic
-	}
-	if src.Underlined != nil {
-		dst.Underlined = src.Underlined
-	}
-	if src.Strikethrough != nil {
-		dst.Strikethrough = src.Strikethrough
-	}
-	if src.Obfuscated != nil {
-		dst.Obfuscated = src.Obfuscated
-	}
+	return b
 }
