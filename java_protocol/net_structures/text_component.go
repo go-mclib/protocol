@@ -20,17 +20,18 @@ import (
 // Wire format: NBT (network format, nameless root)
 type TextComponent struct {
 	// content types (only one should be set)
-	Text       string  `nbt:"text,omitempty" json:"text,omitempty"`
-	Translate  string  `nbt:"translate,omitempty" json:"translate,omitempty"`
-	Fallback   *string `nbt:"fallback,omitempty" json:"fallback,omitempty"`
-	Keybind    string  `nbt:"keybind,omitempty" json:"keybind,omitempty"`
-	Score      *Score  `nbt:"score,omitempty" json:"score,omitempty"`
-	Selector   string  `nbt:"selector,omitempty" json:"selector,omitempty"`
-	NBT        string  `nbt:"nbt,omitempty" json:"nbt,omitempty"`
-	NBTBlock   string  `nbt:"block,omitempty" json:"block,omitempty"`         // for nbt content type
-	NBTEntity  string  `nbt:"entity,omitempty" json:"entity,omitempty"`       // for nbt content type
-	NBTStorage string  `nbt:"storage,omitempty" json:"storage,omitempty"`     // for nbt content type
-	Interpret  *bool   `nbt:"interpret,omitempty" json:"interpret,omitempty"` // for nbt content type
+	Text       string           `nbt:"text,omitempty" json:"text,omitempty"`
+	Translate  string           `nbt:"translate,omitempty" json:"translate,omitempty"`
+	Fallback   *string          `nbt:"fallback,omitempty" json:"fallback,omitempty"`
+	Keybind    string           `nbt:"keybind,omitempty" json:"keybind,omitempty"`
+	Score      *Score           `nbt:"score,omitempty" json:"score,omitempty"`
+	Selector   string           `nbt:"selector,omitempty" json:"selector,omitempty"`
+	NBT        string           `nbt:"nbt,omitempty" json:"nbt,omitempty"`
+	NBTBlock   string           `nbt:"block,omitempty" json:"block,omitempty"`         // for nbt content type
+	NBTEntity  string           `nbt:"entity,omitempty" json:"entity,omitempty"`       // for nbt content type
+	NBTStorage string           `nbt:"storage,omitempty" json:"storage,omitempty"`     // for nbt content type
+	Interpret  *bool            `nbt:"interpret,omitempty" json:"interpret,omitempty"` // for nbt content type
+	Object     *ObjectComponent `nbt:"object,omitempty" json:"-"`
 
 	// translation arguments (for translate content type)
 	With []TextComponent `nbt:"with,omitempty" json:"with,omitempty"`
@@ -113,6 +114,7 @@ func (tc *TextComponent) isSimpleText() bool {
 		tc.NBTEntity == "" &&
 		tc.NBTStorage == "" &&
 		tc.Interpret == nil &&
+		tc.Object == nil &&
 		len(tc.With) == 0 &&
 		tc.Color == "" &&
 		tc.Bold == nil &&
@@ -130,7 +132,7 @@ func (tc *TextComponent) isSimpleText() bool {
 // hasContentType returns true if any content type field is non-empty.
 func (tc *TextComponent) hasContentType() bool {
 	return tc.Text != "" || tc.Translate != "" || tc.Keybind != "" ||
-		tc.Score != nil || tc.Selector != "" || tc.NBT != ""
+		tc.Score != nil || tc.Selector != "" || tc.NBT != "" || tc.Object != nil
 }
 
 // Encode writes the text component as NBT to the writer.
@@ -158,7 +160,7 @@ func (tc *TextComponent) Encode(buf *PacketBuffer) error {
 	return err
 }
 
-// normalizeComponentTag restores empty literal content omitted by reflection.
+// normalizeComponentTag restores omitted literal content and flattens objects.
 // Only component-valued fields are traversed; event payloads remain untouched.
 func normalizeComponentTag(tag nbt.Tag) {
 	switch value := tag.(type) {
@@ -167,8 +169,17 @@ func normalizeComponentTag(tag nbt.Tag) {
 			normalizeComponentTag(child)
 		}
 	case nbt.Compound:
+		// Reflection nests the API descriptor; the component codec is flat.
+		if object, ok := value["object"].(nbt.Compound); ok {
+			delete(value, "object")
+			for key, child := range object {
+				value[key] = child
+			}
+			value["type"] = nbt.String("object")
+			normalizeComponentTag(value["fallback"])
+		}
 		hasContent := false
-		for _, key := range [...]string{"text", "translate", "keybind", "score", "selector", "nbt"} {
+		for _, key := range [...]string{"text", "translate", "keybind", "score", "selector", "nbt", "player", "sprite"} {
 			if _, ok := value[key]; ok {
 				hasContent = true
 				break
@@ -193,6 +204,15 @@ func normalizeComponentTag(tag nbt.Tag) {
 // MarshalJSON retains the empty literal content of styled or parent components.
 func (tc TextComponent) MarshalJSON() ([]byte, error) {
 	type component TextComponent
+	if tc.Object != nil {
+		return json.Marshal(struct {
+			component
+			*ObjectComponent
+			Type     string         `json:"type"`
+			Kind     string         `json:"object"`
+			Fallback *TextComponent `json:"fallback,omitempty"`
+		}{component(tc), tc.Object, "object", tc.Object.kind(), tc.Object.Fallback})
+	}
 	if tc.hasContentType() {
 		return json.Marshal(component(tc))
 	}
@@ -230,24 +250,39 @@ func (tc *TextComponent) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(data, &fields); err != nil {
 			return err
 		}
-		if err := validateComponentContent(func(key string) bool {
+		contentType, err := validateComponentContent(func(key string) bool {
 			value, ok := fields[key]
 			return ok && (key == "type" || !bytes.Equal(bytes.TrimSpace(value), []byte("null")))
 		}, func() (string, error) {
 			var kind string
 			err := json.Unmarshal(fields["type"], &kind)
 			return kind, err
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 		type plain TextComponent
 		value := struct {
 			*plain
-			With  []json.RawMessage `json:"with"`
-			Extra json.RawMessage   `json:"extra"`
+			With     []json.RawMessage `json:"with"`
+			Extra    json.RawMessage   `json:"extra"`
+			Fallback json.RawMessage   `json:"fallback"`
 		}{plain: (*plain)(&decoded)}
 		if err := json.Unmarshal(data, &value); err != nil {
 			return err
+		}
+		if contentType == "object" {
+			decoded.Object = new(ObjectComponent)
+			if err := json.Unmarshal(data, decoded.Object); err != nil {
+				return err
+			}
+			if err := decoded.Object.validate(); err != nil {
+				return err
+			}
+		} else if value.Fallback != nil {
+			if err := json.Unmarshal(value.Fallback, &decoded.Fallback); err != nil {
+				return err
+			}
 		}
 		if value.Extra != nil {
 			if err := json.Unmarshal(value.Extra, &decoded.Extra); err != nil {
@@ -282,30 +317,37 @@ func (tc *TextComponent) UnmarshalJSON(data []byte) error {
 
 // validateComponentContent rejects compounds that would otherwise silently decode
 // to empty text. A discriminator, when present, must select a supported content.
-func validateComponentContent(has func(string) bool, kind func() (string, error)) error {
+func validateComponentContent(has func(string) bool, kind func() (string, error)) (string, error) {
 	if has("type") {
 		contentType, err := kind()
 		if err != nil {
-			return err
+			return "", err
 		}
 		switch contentType {
 		case "translatable":
 			if has("translate") {
-				return nil
+				return contentType, nil
 			}
 		case "text", "keybind", "score", "selector", "nbt":
 			if has(contentType) {
-				return nil
+				return contentType, nil
+			}
+		case "object":
+			if has("player") || has("sprite") {
+				return contentType, nil
 			}
 		}
-		return fmt.Errorf("invalid text component type %q", contentType)
+		return "", fmt.Errorf("invalid text component type %q", contentType)
 	}
-	for _, field := range []string{"text", "translate", "keybind", "score", "selector", "nbt"} {
+	for _, field := range [...]string{"text", "translate", "keybind", "score", "selector", "nbt"} {
 		if has(field) {
-			return nil
+			return field, nil
 		}
 	}
-	return fmt.Errorf("text component has no content")
+	if has("player") || has("sprite") {
+		return "object", nil
+	}
+	return "", fmt.Errorf("text component has no content")
 }
 
 // UnmarshalNBT decodes strings, compounds, and non-empty component lists.
@@ -326,7 +368,7 @@ func (tc *TextComponent) UnmarshalNBT(tag nbt.Tag) error {
 		decoded = list[0]
 		decoded.Extra = append(decoded.Extra, list[1:]...)
 	case nbt.Compound:
-		if err := validateComponentContent(func(key string) bool {
+		contentType, err := validateComponentContent(func(key string) bool {
 			return value[key] != nil
 		}, func() (string, error) {
 			kind, ok := value["type"].(nbt.String)
@@ -334,14 +376,15 @@ func (tc *TextComponent) UnmarshalNBT(tag nbt.Tag) error {
 				return "", fmt.Errorf("component type must be a string")
 			}
 			return string(kind), nil
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 		fields := value
-		if value["extra"] != nil || value["with"] != nil {
+		if value["extra"] != nil || value["with"] != nil || value["object"] != nil || contentType == "object" {
 			fields = make(nbt.Compound, len(value))
 			for key, child := range value {
-				if key != "extra" && key != "with" {
+				if key != "extra" && key != "with" && key != "object" && !(contentType == "object" && key == "fallback") {
 					fields[key] = child
 				}
 			}
@@ -349,6 +392,15 @@ func (tc *TextComponent) UnmarshalNBT(tag nbt.Tag) error {
 		type plain TextComponent
 		if err := nbt.UnmarshalTag(fields, (*plain)(&decoded)); err != nil {
 			return err
+		}
+		if contentType == "object" {
+			decoded.Object = new(ObjectComponent)
+			if err := nbt.UnmarshalTag(value, decoded.Object); err != nil {
+				return err
+			}
+			if err := decoded.Object.validate(); err != nil {
+				return err
+			}
 		}
 		if extra, ok := value["extra"]; ok {
 			var err error

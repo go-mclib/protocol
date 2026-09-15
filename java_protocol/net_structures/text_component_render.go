@@ -50,6 +50,14 @@ func (tc *TextComponent) writeContent(b *strings.Builder, write componentWriter,
 		writeFormatted(b, pattern, tc.With, write)
 		return
 	}
+	if tc.Object != nil {
+		if tc.Object.Fallback != nil {
+			write(tc.Object.Fallback, b)
+		} else {
+			b.WriteString(tc.Object.defaultFallback())
+		}
+		return
+	}
 
 	b.WriteString(tc.Text)
 	b.WriteString(tc.Keybind)
@@ -173,6 +181,12 @@ func (tc *TextComponent) writeMiniMessage(b *strings.Builder) {
 			arg.writeMiniMessage(b)
 		}
 		b.WriteByte('>')
+	} else if tc.Object != nil {
+		if tc.Object.Fallback != nil {
+			tc.Object.Fallback.writeMiniMessage(b)
+		} else {
+			b.WriteString(tc.Object.defaultFallback())
+		}
 	} else if tc.Keybind != "" {
 		b.WriteString("<key:")
 		b.WriteString(tc.Keybind)

@@ -2,6 +2,7 @@ package net_structures_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -278,5 +279,93 @@ func TestNestedEmptyComponentParentsRoundTrip(t *testing.T) {
 				t.Fatalf("nested parent lost text or inherited style: %q", got)
 			}
 		})
+	}
+}
+
+func TestVanillaPlayerHeadChatComponent(t *testing.T) {
+	// Encoded by vanilla 26.2 ComponentSerialization.CODEC + NbtIo.writeAnyTag.
+	raw, err := base64.StdEncoding.DecodeString("CgkABWV4dHJhCgAAAAQIAAAACVtNZW1iZXJdIAAIAAAAASAACgAGcGxheWVyCAAEbmFtZQAFQWxpY2UAAAgAAAATIEFsaWNlIMK7IGhleSBncmFjZQAIAAR0ZXh0AAAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var component ns.TextComponent
+	if err := component.Decode(ns.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if got := component.String(); got != "[Member]  [Alice head] Alice » hey grace" {
+		t.Fatalf("vanilla player-head chat = %q", got)
+	}
+}
+
+func TestObjectComponentsRoundTrip(t *testing.T) {
+	for _, test := range []struct {
+		name, json, plain, mini string
+	}{
+		{"player_name", `{"player":"Alice"}`, "[Alice head]", "[Alice head]"},
+		{"anonymous_profile", `{"type":"object","object":"player","player":{"id":[1,-2,3,-4],"properties":[{"name":"textures","value":"skin","signature":"signed"}]},"hat":false}`, "[unknown player head]", "[unknown player head]"},
+		{"block_atlas", `{"sprite":"minecraft:block/stone"}`, "[block/stone]", "[block/stone]"},
+		{"custom_atlas", `{"object":"atlas","sprite":"plugin:badge","atlas":"minecraft:gui"}`, "[plugin:badge@gui]", "[plugin:badge@gui]"},
+		{"styled_fallback", `{"player":{},"fallback":{"text":"","extra":[{"text":"icon","color":"gold"}]},"color":"aqua","extra":[" tail"]}`, "icon tail", "<aqua><gold>icon</gold> tail</aqua>"},
+		{"nested_object_fallback", `{"sprite":"minecraft:block/stone","fallback":{"player":"Alice","fallback":""}}`, "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var component ns.TextComponent
+			if err := json.Unmarshal([]byte(test.json), &component); err != nil {
+				t.Fatal(err)
+			}
+			for _, format := range []string{"nbt", "json"} {
+				var roundTrip ns.TextComponent
+				if format == "nbt" {
+					buf := ns.NewWriter()
+					if err := component.Encode(buf); err != nil {
+						t.Fatal(err)
+					}
+					if err := roundTrip.Decode(ns.NewReader(buf.Bytes())); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					data, err := json.Marshal(component)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := json.Unmarshal(data, &roundTrip); err != nil {
+						t.Fatalf("%s: %v", data, err)
+					}
+				}
+				if got := roundTrip.String(); got != test.plain {
+					t.Fatalf("%s plain = %q, want %q", format, got, test.plain)
+				}
+				if got := roundTrip.MiniMessage(); got != test.mini {
+					t.Fatalf("%s MiniMessage = %q, want %q", format, got, test.mini)
+				}
+				if test.name == "anonymous_profile" {
+					profile := roundTrip.Object.Player.(map[string]any)
+					id := profile["id"].([]int32)
+					properties := profile["properties"].([]any)
+					texture := properties[0].(map[string]any)
+					if id[1] != -2 || id[3] != -4 || texture["value"] != "skin" || texture["signature"] != "signed" || roundTrip.Object.Hat == nil || *roundTrip.Object.Hat {
+						t.Fatalf("%s lost profile/hat metadata: %+v", format, roundTrip.Object)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestInvalidObjectComponents(t *testing.T) {
+	for _, input := range []string{
+		`{"type":"object"}`,
+		`{"object":"unknown","player":"Alice"}`,
+		`{"object":"atlas","player":"Alice"}`,
+		`{"object":"player","sprite":"minecraft:block/stone"}`,
+		`{"player":42}`,
+		`{"player":{"id":[1,2,3]}}`,
+		`{"player":{"id":[1,2,3,4.5]}}`,
+		`{"player":"Alice","fallback":{}}`,
+	} {
+		var component ns.TextComponent
+		if err := json.Unmarshal([]byte(input), &component); err == nil {
+			t.Errorf("accepted invalid object component %s", input)
+		}
 	}
 }

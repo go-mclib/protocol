@@ -23,6 +23,19 @@ go get github.com/go-mclib/protocol@775
 
 Replace `775` with the protocol version (tag) you want to use.
 
+### Text components
+
+`net_structures.TextComponent` supports JSON and network NBT components, including
+Minecraft 26.2 player-head and atlas-sprite objects. Use `TextComponent.Object`
+with an `ObjectComponent`; its fields are flattened into the component on wire.
+`ObjectComponent.Player` accepts a profile-name string or a `map[string]any` of
+profile fields. Profile UUIDs use four `int32` values.
+
+Object `Fallback` is a full text component; translation `Fallback` remains a
+string. Plain-text rendering uses an object's explicit fallback or vanilla's
+default description, preserving surrounding text. Profile names and textures
+are decoration, not authenticated player identity.
+
 ## Quick Q&A
 
 ### Is there a simpler API?
