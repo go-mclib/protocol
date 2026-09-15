@@ -354,7 +354,7 @@ if _, isEmpty := tag.(nbt.End); isEmpty {
 
 ### Text Component
 
-Text components are used for chat messages, item names, titles, and other formatted text. Simple text-only components use NBT String tags, complex components use NBT Compound tags. JSON serialization is also supported (all fields carry `json` struct tags).
+Text components are used for chat messages, item names, titles, and other formatted text. Simple text-only components use NBT String tags; complex components use NBT Compound tags. Decoding accepts non-empty component lists, including Minecraft's mixed-list NBT wrappers, while retaining the first component's style and children. NBT and JSON encoding retain empty literal content on nested parent components.
 
 ```go
 // simple text
@@ -387,7 +387,7 @@ tc := ns.TextComponent{
 buf.WriteTextComponent(tc)
 tc, _ := buf.ReadTextComponent()
 
-// JSON (handles both plain strings and objects)
+// JSON (handles plain strings, objects and non-empty component lists)
 json.Unmarshal([]byte(`"Hello"`), &tc)        // plain string
 json.Unmarshal([]byte(`{"text":"Hello"}`), &tc) // object
 data, _ := json.Marshal(tc)
@@ -404,7 +404,7 @@ tc.String()      // "Hello"                - plain text, no formatting
 tc.MiniMessage() // "<red><bold>Hello</bold></red>" - Adventure MiniMessage
 ```
 
-All renderers recurse into `Extra` and `With` children. `MiniMessage()` emits `<lang:key:args>` for translatable components and `<key:name>` for keybinds.
+`Render(translate)` resolves translation keys and substitutes `%s`, `%N$s` and `%%` using `With` arguments, then appends `Extra` children. Missing translations use `Fallback` when supplied, otherwise the key; unused arguments are not appended. `String()` and `PlainText()` use the same rules without a resolver. `MiniMessage()` emits `<lang:key:args>` for translatable components and `<key:name>` for keybinds.
 
 ### Slot (Item Stack)
 

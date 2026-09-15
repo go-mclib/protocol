@@ -1,17 +1,18 @@
 package net_structures
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
-// String returns the plain text content of the component and all children,
-// with no formatting. Translate keys are shown as-is.
+// String returns plain text, using translation fallbacks when supplied.
+// Without a fallback or resolver, the translation key itself is the format.
 func (tc TextComponent) String() string {
 	return tc.Render(nil)
 }
 
-// Render returns the plain text with translate keys resolved by fn (if non-nil).
+// Render resolves translation keys with translate. Empty or unchanged keys mean
+// missing translations and use Fallback when present, otherwise the key itself.
 func (tc TextComponent) Render(translate func(string) string) string {
 	var b strings.Builder
 	tc.writePlain(&b, translate)
@@ -26,34 +27,27 @@ func (tc TextComponent) MiniMessage() string {
 	return b.String()
 }
 
-// PlainText extracts the plain text content from a TextComponent tree,
-// stripping all formatting.
+// PlainText returns the same unformatted, fallback-aware content as String.
 func (tc *TextComponent) PlainText() string {
-	var sb strings.Builder
-	tc.plainTextInto(&sb)
-	return sb.String()
+	return tc.Render(nil)
 }
 
 // componentWriter writes a single component's full content (content + extras) to b.
 type componentWriter func(tc *TextComponent, b *strings.Builder)
 
-// writeContent writes the resolved content of this component (without extras).
-// If translate is non-nil and the component has a translate key, the key is
-// resolved and %s / %N$s placeholders are substituted with With args rendered
-// via the provided writer. Otherwise the raw text/key is written.
+// writeContent writes the component's content, without its sibling extras.
 func (tc *TextComponent) writeContent(b *strings.Builder, write componentWriter, translate func(string) string) {
 	if tc.Translate != "" {
+		pattern := tc.Translate
+		if tc.Fallback != nil {
+			pattern = *tc.Fallback
+		}
 		if translate != nil {
-			if pattern := translate(tc.Translate); pattern != "" {
-				writeFormatted(b, pattern, tc.With, write)
-				return
+			if resolved := translate(tc.Translate); resolved != "" && resolved != tc.Translate {
+				pattern = resolved
 			}
 		}
-		// no translation available, show key + with args as-is
-		b.WriteString(tc.Translate)
-		for i := range tc.With {
-			write(&tc.With[i], b)
-		}
+		writeFormatted(b, pattern, tc.With, write)
 		return
 	}
 
@@ -65,60 +59,73 @@ func (tc *TextComponent) writeContent(b *strings.Builder, write componentWriter,
 	b.WriteString(tc.Selector)
 }
 
-// writeFormatted handles MC's Java-style format strings (%s, %1$s, %%, %d).
+// writeFormatted follows TranslatableContents: only %s, %N$s and %% are valid.
+// Any invalid specifier or missing argument displays the entire original format.
 func writeFormatted(b *strings.Builder, pattern string, args []TextComponent, write componentWriter) {
-	seqIdx := 0
-	i := 0
-	for i < len(pattern) {
-		if pattern[i] != '%' || i+1 >= len(pattern) {
-			b.WriteByte(pattern[i])
+	seq := 0
+	for i := 0; i < len(pattern); {
+		if pattern[i] != '%' {
 			i++
 			continue
 		}
-
-		j := i + 1
-
-		// %%
-		if pattern[j] == '%' {
-			b.WriteByte('%')
-			i = j + 1
-			continue
+		end, arg, ok := formatArgument(pattern, i, &seq)
+		if !ok || arg >= len(args) {
+			b.WriteString(pattern)
+			return
 		}
-
-		// %N$s (positional)
-		if j+2 < len(pattern) && pattern[j] >= '1' && pattern[j] <= '9' && pattern[j+1] == '$' && pattern[j+2] == 's' {
-			argIdx := int(pattern[j]-'0') - 1
-			if argIdx >= 0 && argIdx < len(args) {
-				write(&args[argIdx], b)
-			}
-			i = j + 3
-			continue
-		}
-
-		// %s
-		if pattern[j] == 's' {
-			if seqIdx < len(args) {
-				write(&args[seqIdx], b)
-				seqIdx++
-			}
-			i = j + 1
-			continue
-		}
-
-		// %d
-		if pattern[j] == 'd' {
-			if seqIdx < len(args) {
-				write(&args[seqIdx], b)
-				seqIdx++
-			}
-			i = j + 1
-			continue
-		}
-
-		// unknown format specifier, output literally
-		fmt.Fprintf(b, "%%%c", pattern[j])
-		i = j + 1
+		i = end
 	}
+
+	seq = 0
+	start := 0
+	for i := 0; i < len(pattern); {
+		if pattern[i] != '%' {
+			i++
+			continue
+		}
+		b.WriteString(pattern[start:i])
+		end, arg, _ := formatArgument(pattern, i, &seq)
+		if arg < 0 {
+			b.WriteByte('%')
+		} else {
+			write(&args[arg], b)
+		}
+		i, start = end, end
+	}
+	b.WriteString(pattern[start:])
+}
+
+// formatArgument returns -1 for literal percent and advances only implicit args.
+func formatArgument(pattern string, start int, seq *int) (end, arg int, ok bool) {
+	i := start + 1
+	if i >= len(pattern) {
+		return 0, 0, false
+	}
+	if pattern[i] == '%' {
+		return i + 1, -1, true
+	}
+	arg = *seq
+	digits := i
+	for i < len(pattern) && pattern[i] >= '0' && pattern[i] <= '9' {
+		i++
+	}
+	if i > digits {
+		if i >= len(pattern) || pattern[i] != '$' {
+			return 0, 0, false
+		}
+		position, err := strconv.ParseInt(pattern[digits:i], 10, 32)
+		if err != nil || position <= 0 {
+			return 0, 0, false
+		}
+		arg = int(position) - 1
+		i++
+	} else {
+		*seq++
+	}
+	if i >= len(pattern) || pattern[i] != 's' {
+		return 0, 0, false
+	}
+	return i + 1, arg, true
 }
 
 func (tc *TextComponent) writePlain(b *strings.Builder, translate func(string) string) {
@@ -187,12 +194,5 @@ func (tc *TextComponent) writeMiniMessage(b *strings.Builder) {
 		b.WriteString("</")
 		b.WriteString(tags[i])
 		b.WriteByte('>')
-	}
-}
-
-func (tc *TextComponent) plainTextInto(sb *strings.Builder) {
-	sb.WriteString(tc.Text)
-	for i := range tc.Extra {
-		tc.Extra[i].plainTextInto(sb)
 	}
 }
