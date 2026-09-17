@@ -20,7 +20,7 @@ The main branch supports only Minecraft 26.3. Install the current revision:
 go get github.com/go-mclib/protocol@latest
 ```
 
-The unpublished `github.com/go-mclib/nbt` module must be provided locally through a Go workspace or module replacement.
+Dependencies are resolved from `go.mod`; a local `go.work` file is optional.
 
 ### Text components
 
