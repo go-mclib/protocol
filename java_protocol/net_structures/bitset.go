@@ -1,18 +1,21 @@
 package net_structures
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math/bits"
 )
 
-// BitSet is a dynamically-sized bit set, prefixed by its length in longs.
+// BitSet is a dynamically-sized bit set, prefixed by its length in bytes.
 //
 // Wire format:
 //
 //	┌─────────────────┬─────────────────────────────────────┐
-//	│  Length (VarInt)│  Longs (Int64 × Length)             │
+//	│  Length (VarInt)│  Little-endian bytes                │
 //	└─────────────────┴─────────────────────────────────────┘
 //
 // The ith bit is set when (Data[i/64] & (1 << (i % 64))) != 0.
+// Trailing zero bytes are omitted, matching Java BitSet.toByteArray.
 type BitSet struct {
 	data []int64
 }
@@ -33,25 +36,37 @@ func (b *BitSet) Decode(buf *PacketBuffer) error {
 		return fmt.Errorf("negative bitset length: %d", length)
 	}
 
-	b.data = make([]int64, length)
+	b.data = make([]int64, (int(length)+7)/8)
+	var word [8]byte
 	for i := range b.data {
-		val, err := buf.ReadInt64()
-		if err != nil {
-			return fmt.Errorf("failed to read bitset long %d: %w", i, err)
+		word = [8]byte{}
+		n := min(int(length)-i*8, 8)
+		if _, err := buf.Read(word[:n]); err != nil {
+			return fmt.Errorf("failed to read bitset bytes: %w", err)
 		}
-		b.data[i] = int64(val)
+		b.data[i] = int64(binary.LittleEndian.Uint64(word[:]))
 	}
 	return nil
 }
 
 // Encode writes a BitSet to the buffer.
 func (b *BitSet) Encode(buf *PacketBuffer) error {
-	if err := buf.WriteVarInt(VarInt(len(b.data))); err != nil {
+	words := len(b.data)
+	for words > 0 && b.data[words-1] == 0 {
+		words--
+	}
+	length := 0
+	if words > 0 {
+		length = (words-1)*8 + (bits.Len64(uint64(b.data[words-1]))+7)/8
+	}
+	if err := buf.WriteVarInt(VarInt(length)); err != nil {
 		return fmt.Errorf("failed to write bitset length: %w", err)
 	}
-	for i, v := range b.data {
-		if err := buf.WriteInt64(Int64(v)); err != nil {
-			return fmt.Errorf("failed to write bitset long %d: %w", i, err)
+	var word [8]byte
+	for i, v := range b.data[:words] {
+		binary.LittleEndian.PutUint64(word[:], uint64(v))
+		if _, err := buf.Write(word[:min(length-i*8, 8)]); err != nil {
+			return fmt.Errorf("failed to write bitset bytes: %w", err)
 		}
 	}
 	return nil

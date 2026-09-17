@@ -1,8 +1,8 @@
 # go-mclib/protocol
 
-Minimal Go bindings for the Minecraft server protocol.
+Minimal Go bindings for Minecraft Java Edition 26.3 (protocol 777).
 
-For packet mappings, see [go-mclib/data](https://github.com/go-mclib/data/tree/main/go/772/java_packets)
+For packet mappings, see [go-mclib/data](https://github.com/go-mclib/data/tree/main/packets).
 
 Note that this is a low-level library. It is used by the [go-mclib/client](https://github.com/go-mclib/client) repository to implement the client side of the protocol with a higher-level API. If you are looking to create a Minecraft (CLI) client, you should check that repository instead.
 
@@ -14,19 +14,18 @@ Also note that this library is not yet stable. The API is subject to change. The
 
 ## Using the library in your project
 
-This project is still in its early stages, so there are no tagged releases yet. You can use the `@<protocol-version>` tag to get a tag for specific protocol version. For example:
+The main branch supports only Minecraft 26.3. Install the current revision:
 
 ```bash
-# for 26.1 (protocol version 775)
-go get github.com/go-mclib/protocol@775
+go get github.com/go-mclib/protocol@latest
 ```
 
-Replace `775` with the protocol version (tag) you want to use.
+The unpublished `github.com/go-mclib/nbt` module must be provided locally through a Go workspace or module replacement.
 
 ### Text components
 
 `net_structures.TextComponent` supports JSON and network NBT components, including
-Minecraft 26.2 player-head and atlas-sprite objects. Use `TextComponent.Object`
+Minecraft 26.3 player-head and atlas-sprite objects. Use `TextComponent.Object`
 with an `ObjectComponent`; its fields are flattened into the component on wire.
 `ObjectComponent.Player` accepts a profile-name string or a `map[string]any` of
 profile fields. Profile UUIDs use four `int32` values.
@@ -58,7 +57,7 @@ Not at the moment, but maybe in the future through a separate package (e. g. `be
 
 Since I am the only one maintaining this project at the moment, adding concurrent support for older Minecraft versions is practically impossible, also given the limited spare time I have. Therefore, the library has a "live in the moment" policy, where only the latest version of the Minecraft Java Edition protocol is supported.
 
-It is possible that the library might work with older/newer versions (assuming that there were no breaking changes in terms of the networking or packet structures), but I cannot guarantee that. Feel free to experiment and open a PR to help making the library more versatile.
+Older protocol versions are not supported by the current branch.
 
 ## Contributing
 

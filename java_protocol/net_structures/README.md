@@ -63,7 +63,7 @@ These types handle common patterns like length-prefixed arrays, boolean-prefixed
 | ------------- | ------- | ----------- |
 | Prefixed Array | `PrefixedArray[T]` | VarInt length + elements |
 | Prefixed Optional | `PrefixedOptional[T]` | Boolean + value (if true) |
-| BitSet | `BitSet` | VarInt length (in longs) + int64 array |
+| BitSet | `BitSet` | VarInt byte length + little-endian bytes, with trailing zero bytes omitted |
 | Fixed BitSet | `FixedBitSet` | ceil(n/8) bytes (no length prefix) |
 | ID Set | `IDSet` | VarInt type + tag name or IDs |
 | X or Y | `XOrY[X, Y]` | Boolean selector + X or Y value |

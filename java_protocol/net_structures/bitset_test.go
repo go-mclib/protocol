@@ -8,8 +8,8 @@ import (
 )
 
 // BitSet wire format:
-//   VarInt length (number of longs)
-//   Int64 × length (big-endian)
+//   VarInt length (number of bytes)
+//   Little-endian bytes, with trailing zero bytes omitted
 
 var bitSetTestCases = []struct {
 	name     string
@@ -22,24 +22,20 @@ var bitSetTestCases = []struct {
 		expected: []int64{},
 	},
 	{
-		name: "single long with bit 0",
-		// length=1, long=1 (bit 0 set)
-		raw:      []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
+		name:     "bit 0",
+		raw:      []byte{0x01, 0x01},
 		expected: []int64{1},
 	},
 	{
-		name: "single long with bit 63",
-		// length=1, long=0x8000000000000000 (bit 63 set)
-		raw:      []byte{0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		name:     "bit 63",
+		raw:      []byte{0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80},
 		expected: []int64{-9223372036854775808}, // signed representation
 	},
 	{
-		name: "two longs",
-		// length=2, long1=3 (bits 0,1), long2=5 (bits 64,66)
+		name: "bits across long boundary",
 		raw: []byte{
-			0x02,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+			0x09,
+			0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
 		},
 		expected: []int64{3, 5},
 	},
@@ -103,6 +99,44 @@ func TestBitSet_GetSet(t *testing.T) {
 	bs.Clear(63)
 	if bs.Get(63) {
 		t.Error("cleared bit should be unset")
+	}
+}
+
+func TestBitSetClearedCapacity(t *testing.T) {
+	bs := ns.NewBitSet(192)
+	bs.Set(130)
+	bs.Clear(130)
+	bs.Set(8)
+	buf := ns.NewWriter()
+	if err := bs.Encode(buf); err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{2, 0, 1}; !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("cleared high bits must not extend the wire payload: got %x, want %x", buf.Bytes(), want)
+	}
+	bs.Clear(8)
+	buf.Reset()
+	if err := bs.Encode(buf); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf.Bytes(), []byte{0}) {
+		t.Fatalf("empty bitset must encode as zero bytes: %x", buf.Bytes())
+	}
+}
+
+func TestBitSetDecodeBoundaries(t *testing.T) {
+	raw := bytes.NewReader([]byte{2, 1, 1, 0x7f})
+	var bs ns.BitSet
+	if err := bs.Decode(ns.NewReaderFrom(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if !bs.Get(0) || !bs.Get(8) || bs.Get(1) || raw.Len() != 1 {
+		t.Fatal("bitset decoded incorrect bits or consumed the following field")
+	}
+	for _, malformed := range [][]byte{{2, 1}, {0xff, 0xff, 0xff, 0xff, 0x0f}} {
+		if err := bs.Decode(ns.NewReader(malformed)); err == nil {
+			t.Fatalf("accepted malformed bitset %x", malformed)
+		}
 	}
 }
 
