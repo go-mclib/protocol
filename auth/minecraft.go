@@ -2,11 +2,11 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
+
+	ns "github.com/go-mclib/protocol/javaproto/wire"
 )
 
 const (
@@ -29,31 +29,10 @@ type minecraftLoginResponse struct {
 
 func minecraftLoginWithXbox(ctx context.Context, httpClient *http.Client, userHash, xstsToken string) (*minecraftLoginResponse, error) {
 	body := minecraftLoginRequest{IdentityToken: fmt.Sprintf("XBL3.0 x=%s;%s", userHash, xstsToken)}
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, mcAuthLoginWithXboxURL, strings.NewReader(string(buf)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	res, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		data, _ := io.ReadAll(res.Body)
-		return nil, fmt.Errorf("minecraft login_with_xbox failed: %s: %s", res.Status, string(data))
-	}
 	var out minecraftLoginResponse
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+	if err := postJSON(ctx, httpClient, mcAuthLoginWithXboxURL, body, "minecraft login_with_xbox", &out); err != nil {
 		return nil, err
 	}
-
 	return &out, nil
 }
 
@@ -73,19 +52,11 @@ func checkGameOwnership(ctx context.Context, httpClient *http.Client, mcAccessTo
 	}
 	req.Header.Set("Authorization", "Bearer "+mcAccessToken)
 
-	res, err := httpClient.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		data, _ := io.ReadAll(res.Body)
-		return false, fmt.Errorf("entitlements request failed: %s: %s", res.Status, string(data))
-	}
 	var out entitlementsResponse
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+	if err := doJSON(httpClient, req, "entitlements request", &out); err != nil {
 		return false, err
 	}
+
 	if len(out.Items) == 0 {
 		return false, nil
 	}
@@ -106,10 +77,10 @@ func checkGameOwnership(ctx context.Context, httpClient *http.Client, mcAccessTo
 }
 
 type profile struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Skins any    `json:"skins"`
-	Capes any    `json:"capes"`
+	ID    ns.UUID `json:"id"`
+	Name  string  `json:"name"`
+	Skins any     `json:"skins"`
+	Capes any     `json:"capes"`
 }
 
 func fetchMinecraftProfile(ctx context.Context, httpClient *http.Client, mcAccessToken string) (*profile, error) {
@@ -119,23 +90,13 @@ func fetchMinecraftProfile(ctx context.Context, httpClient *http.Client, mcAcces
 	}
 	req.Header.Set("Authorization", "Bearer "+mcAccessToken)
 
-	res, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode == http.StatusNotFound {
-		return nil, nil
-	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		data, _ := io.ReadAll(res.Body)
-		return nil, fmt.Errorf("profile request failed: %s: %s", res.Status, string(data))
-	}
-
 	var out profile
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+	if err := doJSON(httpClient, req, "profile request", &out); err != nil {
+		var statusErr *statusError
+		if errors.As(err, &statusErr) && statusErr.code == http.StatusNotFound {
+			return nil, nil
+		}
 		return nil, err
 	}
-
 	return &out, nil
 }

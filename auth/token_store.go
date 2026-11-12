@@ -6,42 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 )
 
-// CachedSession represents a cached authentication session.
-type CachedSession struct {
-	AccessToken  string    `json:"accessToken"`
-	RefreshToken string    `json:"refreshToken"`
-	UUID         string    `json:"uuid"`
-	Username     string    `json:"username"`
-	ExpiresAt    time.Time `json:"expiresAt"`
-}
-
-// IsValid returns true if the session has a valid access token that hasn't expired.
-// Uses a 5-minute buffer to avoid edge cases.
-func (s *CachedSession) IsValid() bool {
-	if s == nil || s.AccessToken == "" {
-		return false
-	}
-	return time.Now().Add(5 * time.Minute).Before(s.ExpiresAt)
-}
-
-// TokenStore defines an interface to persist and retrieve sessions for multiple accounts.
+// TokenStore persists and retrieves sessions for multiple accounts, keyed by username.
 type TokenStore interface {
-	SaveSession(session *CachedSession) error
-	LoadSession(username string) (*CachedSession, error)
-	Clear(username string) error
-	ListAccounts() ([]string, error)
-}
-
-// TokenStoreConfig holds configuration for creating a TokenStore.
-type TokenStoreConfig struct {
-	// Path is the file path for the credentials cache.
-	// If nil: uses default path "~/.mclib/credentials_cache.json"
-	// If points to empty string: use in-memory store (no persistence)
-	// If points to a path: use that path
-	Path *string
+	SaveSession(session *LoginData) error
+	LoadSession(username string) (*LoginData, error)
 }
 
 // fileTokenStore persists tokens as JSON in a file with 0600 permissions.
@@ -50,36 +20,22 @@ type fileTokenStore struct {
 	filePath string
 }
 
-// NewTokenStore creates a new TokenStore based on the provided configuration.
-// If config.Path is nil, uses the default path: ~/.mclib/credentials_cache.json
-// If config.Path points to empty string, returns an in-memory store (no persistence).
-// If config.Path points to a path, uses that path.
-func NewTokenStore(config TokenStoreConfig) (TokenStore, error) {
-	var path string
-
-	if config.Path == nil {
-		// default
+// NewFileTokenStore creates a TokenStore persisted to path, or to
+// ~/.mclib/credentials_cache.json if path is empty.
+func NewFileTokenStore(path string) (TokenStore, error) {
+	if path == "" {
 		var err error
-		path, err = getDefaultCredentialsFilePath()
-		if err != nil {
+		if path, err = getDefaultCredentialsFilePath(); err != nil {
 			return nil, err
 		}
-	} else if *config.Path == "" {
-		// empty string means in-memory store
-		return newMemoryTokenStore(), nil
-	} else {
-		// custom path
-		path = *config.Path
 	}
 
-	// ensure directory
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create credentials directory: %w", err)
 	}
 
-	// test if path is writable
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0o600)
+	// test if path is writable, keeping existing content
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("credentials path is not writable: %w", err)
 	}
@@ -88,7 +44,7 @@ func NewTokenStore(config TokenStoreConfig) (TokenStore, error) {
 	return &fileTokenStore{filePath: path}, nil
 }
 
-func (s *fileTokenStore) SaveSession(session *CachedSession) error {
+func (s *fileTokenStore) SaveSession(session *LoginData) error {
 	if session == nil || session.Username == "" {
 		return errors.New("session with username is required")
 	}
@@ -97,12 +53,11 @@ func (s *fileTokenStore) SaveSession(session *CachedSession) error {
 	if err != nil {
 		return err
 	}
-
 	sessions[session.Username] = session
 	return s.saveSessions(sessions)
 }
 
-func (s *fileTokenStore) LoadSession(username string) (*CachedSession, error) {
+func (s *fileTokenStore) LoadSession(username string) (*LoginData, error) {
 	if username == "" {
 		return nil, errors.New("username cannot be empty")
 	}
@@ -111,65 +66,29 @@ func (s *fileTokenStore) LoadSession(username string) (*CachedSession, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return sessions[username], nil
 }
 
-func (s *fileTokenStore) Clear(username string) error {
-	if username == "" {
-		return errors.New("username cannot be empty")
-	}
-
-	sessions, err := s.loadSessions()
-	if err != nil {
-		return err
-	}
-
-	delete(sessions, username)
-
-	// if no accounts remain, remove the file
-	if len(sessions) == 0 {
-		return os.Remove(s.filePath)
-	}
-
-	return s.saveSessions(sessions)
-}
-
-func (s *fileTokenStore) ListAccounts() ([]string, error) {
-	sessions, err := s.loadSessions()
-	if err != nil {
-		return nil, err
-	}
-
-	accounts := make([]string, 0, len(sessions))
-	for username := range sessions {
-		accounts = append(accounts, username)
-	}
-
-	return accounts, nil
-}
-
-func (s *fileTokenStore) loadSessions() (map[string]*CachedSession, error) {
+func (s *fileTokenStore) loadSessions() (map[string]*LoginData, error) {
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return make(map[string]*CachedSession), nil
+			return make(map[string]*LoginData), nil
 		}
 		return nil, err
 	}
-
 	if len(data) == 0 {
-		return make(map[string]*CachedSession), nil
+		return make(map[string]*LoginData), nil
 	}
 
-	var sessions map[string]*CachedSession
+	var sessions map[string]*LoginData
 	if err := json.Unmarshal(data, &sessions); err != nil {
 		// try to migrate from old format (map[string]string with just refresh tokens)
 		var oldTokens map[string]string
 		if jsonErr := json.Unmarshal(data, &oldTokens); jsonErr == nil {
-			sessions = make(map[string]*CachedSession)
+			sessions = make(map[string]*LoginData)
 			for username, refreshToken := range oldTokens {
-				sessions[username] = &CachedSession{
+				sessions[username] = &LoginData{
 					RefreshToken: refreshToken,
 					Username:     username,
 				}
@@ -178,42 +97,55 @@ func (s *fileTokenStore) loadSessions() (map[string]*CachedSession, error) {
 		}
 		return nil, fmt.Errorf("failed to parse credentials file: %w", err)
 	}
-
 	if sessions == nil {
-		sessions = make(map[string]*CachedSession)
+		sessions = make(map[string]*LoginData)
 	}
-
 	return sessions, nil
 }
 
-func (s *fileTokenStore) saveSessions(sessions map[string]*CachedSession) error {
+// saveSessions writes atomically through a unique temp file, so concurrent
+// writers (several bots sharing the cache) never clobber each other's temp file.
+func (s *fileTokenStore) saveSessions(sessions map[string]*LoginData) error {
 	data, err := json.MarshalIndent(sessions, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
 
-	tmpPath := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(s.filePath), ".credentials-*.tmp")
+	if err != nil {
 		return err
 	}
-
-	return os.Rename(tmpPath, s.filePath)
+	tmpPath := f.Name()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, s.filePath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // memoryTokenStore is an in-memory implementation of TokenStore.
 // It does not persist sessions to disk.
 type memoryTokenStore struct {
-	sessions map[string]*CachedSession
+	sessions map[string]*LoginData
 }
 
-// newMemoryTokenStore creates a new in-memory token store.
-func newMemoryTokenStore() TokenStore {
+// NewMemoryTokenStore creates a TokenStore that keeps sessions in memory only.
+func NewMemoryTokenStore() TokenStore {
 	return &memoryTokenStore{
-		sessions: make(map[string]*CachedSession),
+		sessions: make(map[string]*LoginData),
 	}
 }
 
-func (m *memoryTokenStore) SaveSession(session *CachedSession) error {
+func (m *memoryTokenStore) SaveSession(session *LoginData) error {
 	if session == nil || session.Username == "" {
 		return errors.New("session with username is required")
 	}
@@ -221,27 +153,11 @@ func (m *memoryTokenStore) SaveSession(session *CachedSession) error {
 	return nil
 }
 
-func (m *memoryTokenStore) LoadSession(username string) (*CachedSession, error) {
+func (m *memoryTokenStore) LoadSession(username string) (*LoginData, error) {
 	if username == "" {
 		return nil, errors.New("username cannot be empty")
 	}
 	return m.sessions[username], nil
-}
-
-func (m *memoryTokenStore) Clear(username string) error {
-	if username == "" {
-		return errors.New("username cannot be empty")
-	}
-	delete(m.sessions, username)
-	return nil
-}
-
-func (m *memoryTokenStore) ListAccounts() ([]string, error) {
-	accounts := make([]string, 0, len(m.sessions))
-	for username := range m.sessions {
-		accounts = append(accounts, username)
-	}
-	return accounts, nil
 }
 
 func getDefaultCredentialsFilePath() (string, error) {

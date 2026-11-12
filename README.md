@@ -24,7 +24,7 @@ Dependencies are resolved from `go.mod`; a local `go.work` file is optional.
 
 ### Text components
 
-`net_structures.TextComponent` supports JSON and network NBT components, including
+`wire.TextComponent` supports JSON and network NBT components, including
 Minecraft 26.3 player-head and atlas-sprite objects. Use `TextComponent.Object`
 with an `ObjectComponent`; its fields are flattened into the component on wire.
 `ObjectComponent.Player` accepts a profile-name string or a `map[string]any` of

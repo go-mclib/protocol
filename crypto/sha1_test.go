@@ -12,11 +12,11 @@ var sha1TestCases = map[string]string{
 	"simon": "88e16a1019277b15d58faf0541e11910eb756f6",
 }
 
-func TestMinecraftSHA1(t *testing.T) {
+func TestMinecraftHexDigest(t *testing.T) {
 	for username, expected := range sha1TestCases {
-		actual := crypto.MinecraftSHA1(username)
+		actual := crypto.MinecraftHexDigest([]byte(username))
 		if actual != expected {
-			t.Errorf("MinecraftSHA1(%q) = %q; want %q", username, actual, expected)
+			t.Errorf("MinecraftHexDigest(%q) = %q; want %q", username, actual, expected)
 		}
 	}
 }

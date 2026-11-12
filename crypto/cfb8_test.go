@@ -2,6 +2,8 @@ package crypto_test
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/hex"
 	"testing"
 
@@ -25,61 +27,72 @@ var cfb8TestCases = []struct {
 	},
 }
 
-func newEnabledEncryption(t *testing.T, sharedSecret []byte) *crypto.Encryption {
+func newStream(t *testing.T, sharedSecret []byte, decrypt bool) cipher.Stream {
 	t.Helper()
-	e := crypto.NewEncryption()
-	e.SetSharedSecret(sharedSecret)
-	if err := e.EnableEncryption(); err != nil {
-		t.Fatalf("EnableEncryption: %v", err)
+	block, err := aes.NewCipher(sharedSecret)
+	if err != nil {
+		t.Fatalf("aes.NewCipher: %v", err)
 	}
-	return e
+	return crypto.NewCFB8(block, sharedSecret, decrypt)
 }
 
-func TestEncryptionEncrypt(t *testing.T) {
+func TestCFB8Encrypt(t *testing.T) {
 	for i, tc := range cfb8TestCases {
 		secret, _ := hex.DecodeString(tc.sharedSecret)
 		plaintext, _ := hex.DecodeString(tc.plaintext)
 
-		e := newEnabledEncryption(t, secret)
-		got := hex.EncodeToString(e.Encrypt(plaintext))
+		encrypted := make([]byte, len(plaintext))
+		newStream(t, secret, false).XORKeyStream(encrypted, plaintext)
+		got := hex.EncodeToString(encrypted)
 		if got != tc.ciphertext {
 			t.Errorf("test %d: encryption failed\nexpected: %s\ngot:      %s", i, tc.ciphertext, got)
 		}
 	}
 }
 
-func TestEncryptionDecrypt(t *testing.T) {
+func TestCFB8Decrypt(t *testing.T) {
 	for i, tc := range cfb8TestCases {
 		secret, _ := hex.DecodeString(tc.sharedSecret)
 		ciphertext, _ := hex.DecodeString(tc.ciphertext)
 
-		e := newEnabledEncryption(t, secret)
-		got := hex.EncodeToString(e.Decrypt(ciphertext))
+		// decrypt in place: dst and src fully overlap
+		newStream(t, secret, true).XORKeyStream(ciphertext, ciphertext)
+		got := hex.EncodeToString(ciphertext)
 		if got != tc.plaintext {
 			t.Errorf("test %d: decryption failed\nexpected: %s\ngot:      %s", i, tc.plaintext, got)
 		}
 	}
 }
 
-func TestEncryptionChunkedStream(t *testing.T) {
+func TestCFB8ChunkedStream(t *testing.T) {
 	// CFB8 is a stateful stream: chunked encryption must equal one-shot encryption
 	secret, _ := hex.DecodeString(cfb8TestCases[0].sharedSecret)
 	plaintext, _ := hex.DecodeString(cfb8TestCases[1].plaintext)
 
-	oneShot := newEnabledEncryption(t, secret).Encrypt(plaintext)
+	oneShot := make([]byte, len(plaintext))
+	newStream(t, secret, false).XORKeyStream(oneShot, plaintext)
 
-	chunked := newEnabledEncryption(t, secret)
-	var got []byte
+	chunked := newStream(t, secret, false)
+	got := make([]byte, len(plaintext))
 	for i := 0; i < len(plaintext); i += 7 {
-		got = append(got, chunked.Encrypt(plaintext[i:min(i+7, len(plaintext))])...)
+		end := min(i+7, len(plaintext))
+		chunked.XORKeyStream(got[i:end], plaintext[i:end])
 	}
 
 	if !bytes.Equal(got, oneShot) {
 		t.Errorf("chunked encryption mismatch\nexpected: %x\ngot:      %x", oneShot, got)
 	}
 
-	decrypted := newEnabledEncryption(t, secret).Decrypt(got)
+	decrypted := make([]byte, len(got))
+	newStream(t, secret, true).XORKeyStream(decrypted, got)
 	if !bytes.Equal(decrypted, plaintext) {
 		t.Errorf("round-trip mismatch\nexpected: %x\ngot:      %x", plaintext, decrypted)
+	}
+}
+
+func TestNewSharedSecret(t *testing.T) {
+	a, b := crypto.NewSharedSecret(), crypto.NewSharedSecret()
+	if len(a) != 16 || len(b) != 16 || bytes.Equal(a, b) {
+		t.Fatalf("shared secrets %x %x", a, b)
 	}
 }

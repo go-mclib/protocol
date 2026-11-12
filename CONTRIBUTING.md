@@ -26,9 +26,10 @@ The codebase is written in Go, formatted with `go fmt`. It is divided into the f
 - [`auth`](./auth/): Microsoft OAuth2 authentication flow (login → Xbox Live → XSTS → Minecraft), session caching, and [Mojang certificate](https://minecraft.wiki/w/Mojang_API#Certificates) fetching for chat signing. [Learn how to obtain a client ID here](https://minecraft.wiki/w/Microsoft_authentication#Microsoft_OAuth2_flow);
 - [`crypto`](./crypto/): SHA1 hash generation, CFB8 mode implementation, and AES encryption utilities used by the protocol;
 - NBT (Named Binary Tag) now lives in its own module, [`github.com/go-mclib/nbt`](https://github.com/go-mclib/nbt) (file + network formats, SNBT parse/stringify, struct marshaling, streaming visitor);
-- [`java_protocol`](./java_protocol/): Core Java Edition protocol implementation including:
-  - [`java_protocol/net_structures`](./java_protocol/net_structures/): Protocol data types (`VarInt`, `VarLong`, `UUID`, `Position`, composite types like `PrefixedArray`, `XOrY`, etc.);
-  - [`java_protocol/session_server`](./java_protocol/session_server/): Communication with [Mojang's session server](https://minecraft.wiki/w/Mojang_API#Verify_login_session_on_client) for authentication verification;
+- [`javaproto`](./javaproto/): Core Java Edition protocol implementation including:
+  - [`javaproto/wire`](./javaproto/wire/): Protocol data types (`VarInt`, `VarLong`, `UUID`, `Position`, composite types like `PrefixedArray`, `PrefixedOptional`, etc.);
+  - [`javaproto/textformat`](./javaproto/textformat/): Conversion between text components and legacy `§`/`&` color codes and Adventure MiniMessage tags;
+  - [`sessionserver`](./sessionserver/): Communication with [Mojang's session server](https://minecraft.wiki/w/Mojang_API#Verify_login_session_on_client) for authentication verification;
   - Packet serialization/deserialization with compression and encryption support;
   - TCP client/server connection handling with SRV record resolution;
 

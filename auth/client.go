@@ -2,46 +2,85 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"time"
+
+	ns "github.com/go-mclib/protocol/javaproto/wire"
+	browser "github.com/pkg/browser"
 )
 
-// AuthClient is the main struct for the auth client
-type AuthClient struct {
-	cfg        AuthClientConfig
+// Client is the Microsoft/Xbox/Minecraft authentication client
+type Client struct {
+	cfg        Config
 	httpClient *http.Client
 	tokenStore TokenStore
 	username   string
 }
 
-// AuthClientConfig is the configuration for the auth client
-type AuthClientConfig struct {
-	ClientID         string
-	RedirectPort     int
-	Scopes           []string
-	HTTPClient       *http.Client
-	TokenStore       TokenStore
-	TokenStoreConfig TokenStoreConfig
-	Username         string
+// Config is the configuration for the auth client
+type Config struct {
+	ClientID     string
+	RedirectPort int
+	Scopes       []string
+	HTTPClient   *http.Client
+	// TokenStore persists sessions. Nil uses the default file store
+	// (~/.mclib/credentials_cache.json); if that cannot be created, sessions
+	// are not cached.
+	TokenStore TokenStore
+	Username   string
 }
 
-// LoginData is the data returned from a login
+// LoginData is the data returned from a login. It is also the cached session format.
 type LoginData struct {
-	AccessToken  string
-	RefreshToken string
-	UUID         string
-	Username     string
-	ExpiresAt    time.Time
+	AccessToken  string    `json:"accessToken"`
+	RefreshToken string    `json:"refreshToken"`
+	UUID         ns.UUID   `json:"uuid"`
+	Username     string    `json:"username"`
+	ExpiresAt    time.Time `json:"expiresAt"`
 }
 
-// NewClient creates a new AuthClient with the given configuration
-func NewClient(cfg AuthClientConfig) *AuthClient {
+// UnmarshalJSON reads cached sessions. Caches migrated from the refresh-token-only
+// format were written with an empty "uuid", which decodes to the nil UUID.
+func (d *LoginData) UnmarshalJSON(data []byte) error {
+	type plain LoginData
+	var cached struct {
+		plain
+		UUID string `json:"uuid"`
+	}
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return err
+	}
+	decoded := LoginData(cached.plain)
+	if cached.UUID != "" {
+		uuid, err := ns.UUIDFromString(cached.UUID)
+		if err != nil {
+			return err
+		}
+		decoded.UUID = uuid
+	}
+	*d = decoded
+	return nil
+}
+
+// IsValid returns true if the session has a valid access token that hasn't expired.
+// Uses a 5-minute buffer to avoid edge cases.
+func (d *LoginData) IsValid() bool {
+	if d == nil || d.AccessToken == "" {
+		return false
+	}
+	return time.Now().Add(5 * time.Minute).Before(d.ExpiresAt)
+}
+
+// NewClient creates a new Client with the given configuration
+func NewClient(cfg Config) *Client {
 	if cfg.RedirectPort == 0 {
-		cfg.RedirectPort = tryPort()
+		cfg.RedirectPort = freeLoopbackPort()
 	}
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = []string{"XboxLive.signin", "offline_access"}
@@ -52,52 +91,50 @@ func NewClient(cfg AuthClientConfig) *AuthClient {
 		httpClient = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	var store TokenStore
-	if cfg.TokenStore != nil {
-		store = cfg.TokenStore
-	} else {
-		// try to create store from config
-		if s, err := NewTokenStore(cfg.TokenStoreConfig); err == nil {
+	store := cfg.TokenStore
+	if store == nil {
+		if s, err := NewFileTokenStore(""); err == nil {
 			store = s
 		}
 	}
 
-	return &AuthClient{cfg: cfg, httpClient: httpClient, tokenStore: store, username: cfg.Username}
+	return &Client{cfg: cfg, httpClient: httpClient, tokenStore: store, username: cfg.Username}
 }
 
 // AuthorizeWithLocalServer starts a local HTTP server and opens a browser to
-// the Microsoft authorization URL. It returns the authorization code, which
-// can be used to exchange for tokens.
-func (c *AuthClient) AuthorizeWithLocalServer(ctx context.Context) (string, error) {
+// the Microsoft authorization URL. It returns the refresh token obtained by
+// exchanging the authorization code. If the browser cannot be opened, the URL
+// is printed to stderr for manual navigation.
+func (c *Client) AuthorizeWithLocalServer(ctx context.Context) (string, error) {
 	if c.cfg.ClientID == "" {
 		return "", errors.New("missing client_id in Config")
 	}
 
-	redirectURL := fmt.Sprintf("http://127.0.0.1:%d", c.cfg.RedirectPort)
-	authURL := buildAuthorizeURL(c.cfg.ClientID, redirectURL, c.cfg.Scopes)
-
+	state := newOAuthState()
 	codeCh := make(chan string, 1)
-	srv, err := startLocalServer(c.cfg.RedirectPort, codeCh)
+	srv, port, err := startLocalServer(c.cfg.RedirectPort, state, codeCh)
 	if err != nil {
 		return "", err
 	}
 	defer stopLocalServer(srv)
 
-	if err := openBrowser(authURL); err != nil {
-		// note: opening the browser can fail in headless environments; still allow manual navigation.
-		// return the URL in the error for convenience.
-		return "", fmt.Errorf("failed to open browser, navigate to: %s, err: %w", authURL, err)
+	redirectURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	authURL := buildAuthorizeURL(c.cfg.ClientID, redirectURL, state, c.cfg.Scopes)
+	if err := browser.OpenURL(authURL); err != nil {
+		// headless environments: keep the callback server up for manual navigation
+		fmt.Fprintf(os.Stderr, "failed to open browser (%v); open this URL to sign in: %s\n", err, authURL)
 	}
 
 	// wait for code or cancellation
 	select {
 	case <-ctx.Done():
-		return "", errors.New("authentication canceled")
+		return "", fmt.Errorf("authentication canceled: %w", ctx.Err())
 	case code := <-codeCh:
 		if code == "" {
 			return "", errors.New("failed to obtain authorization code")
 		}
-		tokenRes, err := exchangeAuthCodeForTokens(ctx, c.httpClient, c.cfg.ClientID, redirectURL, code)
+		form := url.Values{"grant_type": {"authorization_code"}, "code": {code}}
+		tokenRes, err := requestMSToken(ctx, c.httpClient, c.cfg.ClientID, redirectURL, form, "token exchange")
 		if err != nil {
 			return "", err
 		}
@@ -109,24 +146,33 @@ func (c *AuthClient) AuthorizeWithLocalServer(ctx context.Context) (string, erro
 }
 
 // LoginWithRefreshToken performs a login with a refresh token.
-func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken string) (LoginData, error) {
+func (c *Client) LoginWithRefreshToken(ctx context.Context, refreshToken string) (LoginData, error) {
 	if c.cfg.ClientID == "" {
 		return LoginData{}, errors.New("missing client_id in Config")
+	}
+	if refreshToken == "" {
+		return LoginData{}, errors.New("empty refresh token")
 	}
 	redirectURL := fmt.Sprintf("http://127.0.0.1:%d", c.cfg.RedirectPort)
 
 	// refresh Microsoft access token
-	tokRes, err := refreshAccessToken(ctx, c.httpClient, c.cfg.ClientID, redirectURL, refreshToken)
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
+	tokRes, err := requestMSToken(ctx, c.httpClient, c.cfg.ClientID, redirectURL, form, "refresh token request")
 	if err != nil {
 		return LoginData{}, err
 	}
-	msAccessToken := tokRes.AccessToken
-	refreshToken = tokRes.RefreshToken
+	// the response may omit a rotated refresh token; keep the working one then
+	if tokRes.RefreshToken != "" {
+		refreshToken = tokRes.RefreshToken
+	}
 
 	// XBL authenticate
-	xblRes, err := xblAuthenticate(ctx, c.httpClient, msAccessToken)
+	xblRes, err := xblAuthenticate(ctx, c.httpClient, tokRes.AccessToken)
 	if err != nil {
 		return LoginData{}, err
+	}
+	if len(xblRes.DisplayClaims.XUI) == 0 {
+		return LoginData{}, errors.New("xbl response has no user hash")
 	}
 
 	// XSTS authorize
@@ -155,7 +201,7 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 	if err != nil {
 		return LoginData{}, err
 	}
-	if profile == nil || profile.ID == "" {
+	if profile == nil || profile.ID.IsNil() {
 		return LoginData{}, errors.New("minecraft profile not found for account")
 	}
 
@@ -177,9 +223,9 @@ func (c *AuthClient) LoginWithRefreshToken(ctx context.Context, refreshToken str
 // interactive auth via a local HTTP callback and browser.
 //
 // The username for caching is determined by:
-// 1. The Username field in AuthClientConfig if set
+// 1. The Username field in Config if set
 // 2. The username from the LoginData response (after successful login)
-func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
+func (c *Client) Login(ctx context.Context) (LoginData, error) {
 	store := c.tokenStore
 
 	// try cached session if username is specified
@@ -188,14 +234,14 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 			// check if session is still valid (access token not expired)
 			if session.IsValid() {
 				c.username = session.Username
-				return fromSession(session), nil
+				return *session, nil
 			}
 
 			// session expired but we have a refresh token - try to refresh
 			if session.RefreshToken != "" {
 				if data, err := c.LoginWithRefreshToken(ctx, session.RefreshToken); err == nil {
 					c.username = data.Username
-					_ = store.SaveSession(data.toSession())
+					_ = store.SaveSession(&data) // caching is best-effort
 					return data, nil
 				}
 			}
@@ -207,7 +253,6 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 	if err != nil {
 		return LoginData{}, err
 	}
-
 	data, err := c.LoginWithRefreshToken(ctx, rt)
 	if err != nil {
 		return LoginData{}, err
@@ -216,46 +261,23 @@ func (c *AuthClient) Login(ctx context.Context) (LoginData, error) {
 	// save session with the username from login response
 	c.username = data.Username
 	if store != nil {
-		_ = store.SaveSession(data.toSession())
+		_ = store.SaveSession(&data) // caching is best-effort
 	}
-
 	return data, nil
 }
 
-// GetUsername returns the current username for this client.
-func (c *AuthClient) GetUsername() string {
+// Username returns the current username for this client.
+func (c *Client) Username() string {
 	return c.username
 }
 
-func (d LoginData) toSession() *CachedSession {
-	return &CachedSession{
-		AccessToken:  d.AccessToken,
-		RefreshToken: d.RefreshToken,
-		UUID:         d.UUID,
-		Username:     d.Username,
-		ExpiresAt:    d.ExpiresAt,
-	}
-}
-
-func fromSession(s *CachedSession) LoginData {
-	return LoginData{
-		AccessToken:  s.AccessToken,
-		RefreshToken: s.RefreshToken,
-		UUID:         s.UUID,
-		Username:     s.Username,
-		ExpiresAt:    s.ExpiresAt,
-	}
-}
-
-// tryPort tries to find an open port
-func tryPort() int {
-	randomPort := rand.Intn(65535-1024) + 1024
-
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", randomPort))
+// freeLoopbackPort asks the OS for a free loopback port, or returns 0 so the
+// callback server picks one when it starts.
+func freeLoopbackPort() int {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return tryPort()
+		return 0
 	}
-	defer listener.Close()
-
-	return randomPort
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }

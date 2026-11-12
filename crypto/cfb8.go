@@ -2,53 +2,44 @@ package crypto
 
 // inspired by https://github.com/Tnze/go-mc/blob/076f723e3d1467e8bb11fc09dd29e8e92caf339f/net/CFB8/cfb8.go
 
-import "crypto/cipher"
+import (
+	"bytes"
+	"crypto/cipher"
+)
 
 type cfb8 struct {
-	block     cipher.Block
-	blockSize int
-	iv        []byte
-	temp      []byte
-	decrypt   bool
+	block   cipher.Block
+	iv      []byte
+	temp    []byte
+	decrypt bool
 }
 
-// XORKeyStream satisfies cipher.Stream.
+// XORKeyStream satisfies cipher.Stream; dst and src may overlap entirely.
 func (c *cfb8) XORKeyStream(dst, src []byte) {
+	last := len(c.iv) - 1
 	for i := range src {
+		in := src[i]
 		copy(c.temp, c.iv)
-
 		c.block.Encrypt(c.iv, c.iv)
-		keystreamByte := c.iv[0]
+		out := in ^ c.iv[0]
+		dst[i] = out
 
-		outputByte := src[i] ^ keystreamByte
-		dst[i] = outputByte
 		copy(c.iv, c.temp[1:])
-
 		if c.decrypt {
-			c.iv[c.blockSize-1] = src[i]
+			c.iv[last] = in
 		} else {
-			c.iv[c.blockSize-1] = outputByte
+			c.iv[last] = out
 		}
 	}
 }
 
-func newEncryptStream(block cipher.Block, iv []byte) cipher.Stream {
-	return newCFB8(block, iv, false)
-}
-
-func newDecryptStream(block cipher.Block, iv []byte) cipher.Stream {
-	return newCFB8(block, iv, true)
-}
-
-func newCFB8(block cipher.Block, iv []byte, decrypt bool) *cfb8 {
-	ivCopy := make([]byte, len(iv))
-	copy(ivCopy, iv)
-
+// NewCFB8 returns an AES/CFB8 stream as used by the Minecraft protocol. The
+// protocol uses the shared secret as both the AES key and iv; iv is copied.
+func NewCFB8(block cipher.Block, iv []byte, decrypt bool) cipher.Stream {
 	return &cfb8{
-		block:     block,
-		blockSize: block.BlockSize(),
-		iv:        ivCopy,
-		temp:      make([]byte, block.BlockSize()),
-		decrypt:   decrypt,
+		block:   block,
+		iv:      bytes.Clone(iv),
+		temp:    make([]byte, block.BlockSize()),
+		decrypt: decrypt,
 	}
 }

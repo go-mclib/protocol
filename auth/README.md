@@ -103,7 +103,7 @@ Since Minecraft 1.16, Mojang accounts have been migrated to Microsoft accounts. 
 ### Basic Login (Interactive)
 
 ```go
-client := auth.NewClient(auth.AuthClientConfig{
+client := auth.NewClient(auth.Config{
     ClientID: "your-azure-app-client-id",
 })
 
@@ -129,7 +129,7 @@ The `Login()` method automatically handles full session caching, including the M
 The Minecraft access token is valid for **24 hours**, so rapid start/stop cycles won't trigger re-authentication.
 
 ```go
-client := auth.NewClient(auth.AuthClientConfig{
+client := auth.NewClient(auth.Config{
     ClientID: "your-azure-app-client-id",
     Username: "PlayerName", // specify which cached account to use
 })
@@ -146,7 +146,7 @@ loginData, err = client.Login(ctx)
 If you already have a refresh token:
 
 ```go
-client := auth.NewClient(auth.AuthClientConfig{
+client := auth.NewClient(auth.Config{
     ClientID: "your-azure-app-client-id",
 })
 
@@ -162,42 +162,42 @@ By default, tokens are stored in `~/.mclib/credentials_cache.json`. You can cust
 
 ```go
 // custom file path
-customPath := filepath.Join(os.Getenv("HOME"), "my_credentials_cache.json")
-client := auth.NewClient(auth.AuthClientConfig{
-    ClientID: "your-client-id",
-    TokenStoreConfig: auth.TokenStoreConfig{
-        Path: &customPath,
-    },
+store, err := auth.NewFileTokenStore(filepath.Join(os.Getenv("HOME"), "my_credentials_cache.json"))
+if err != nil {
+    log.Fatal(err)
+}
+client := auth.NewClient(auth.Config{
+    ClientID:   "your-client-id",
+    TokenStore: store,
 })
 
 // in-memory only (no persistence)
-client := auth.NewClient(auth.AuthClientConfig{
-    ClientID: "your-client-id",
-    TokenStoreConfig: auth.TokenStoreConfig{
-        Path: nil,
-    },
+client := auth.NewClient(auth.Config{
+    ClientID:   "your-client-id",
+    TokenStore: auth.NewMemoryTokenStore(),
 })
 
-// custom implementation (e.g. if you want to use database or redis instead, you could??)
-// but in 99 % cases, the default file-based store is sufficient
-client := auth.NewClient(auth.AuthClientConfig{
+// custom implementation (e.g. a database), implementing
+// SaveSession(*auth.LoginData) and LoadSession(username)
+client := auth.NewClient(auth.Config{
     ClientID:   "your-client-id",
-    TokenStore: myCustomStore, // implements auth.TokenStore
+    TokenStore: myCustomStore,
 })
 ```
+
+If the browser cannot be opened (headless environments), the sign-in URL is printed to stderr and the local callback server keeps waiting.
 
 ### Fetching Mojang Certificates
 
 For chat message signing (1.19+), you need Mojang-issued certificates. To do this, you need to have the access token of the account you want to sign messages for.
 
 ```go
-certData, err := auth.FetchMojangCertificate(loginData.AccessToken)
+certData, err := authClient.FetchMojangCertificate(ctx, loginData.AccessToken)
 if err != nil {
     log.Fatal(err)
 }
 
 // certData.PrivateKey - RSA private key for signing
-// certData.PublicKey - RSA public key
 // certData.PublicKeyBytes - DER-encoded public key
 // certData.SignatureBytes - raw bytes of Mojang's signature of your public key
 // certData.ExpiryTime - when the certificate expires
@@ -208,11 +208,10 @@ if err != nil {
 | Field | Description | Default |
 | ----- | ------------ | ------ |
 | `ClientID` | Azure AD application client ID | Required |
-| `RedirectPort` | Local port for OAuth callback | Random available port |
+| `RedirectPort` | Local loopback port for OAuth callback | Free port chosen by the OS |
 | `Scopes` | OAuth scopes to request | `["XboxLive.signin", "offline_access"]` |
 | `HTTPClient` | Custom HTTP client | 20s timeout client |
-| `TokenStore` | Custom token storage | File-based store |
-| `TokenStoreConfig` | Config for default store | `~/.mclib/credentials_cache.json` |
+| `TokenStore` | Session storage (`NewFileTokenStore`, `NewMemoryTokenStore` or custom) | File store at `~/.mclib/credentials_cache.json` |
 | `Username` | Account username for caching | From login response |
 
 ## API Endpoints Used
@@ -245,7 +244,7 @@ The auth package caches full sessions to disk, including:
 
 - **Access token** - The Minecraft JWT used to join servers
 - **Refresh token** - Long-lived token for obtaining new access tokens
-- **UUID** - Player's unique identifier
+- **UUID** - Player's unique identifier (`ns.UUID`, stored as a hyphenated string; older dashless entries still load)
 - **Username** - Player's display name
 - **Expiry time** - When the access token expires (24 hours from issuance)
 
@@ -254,7 +253,8 @@ Sessions are automatically migrated from the old format (refresh token only) to 
 ## Security Notes
 
 - Sessions are stored with `0600` permissions (owner read/write only)
-- Tokens are saved atomically using temp file + rename
+- Tokens are saved atomically using a unique temp file + rename
+- The OAuth callback only accepts requests carrying the random `state` sent with the authorization URL
 - Access tokens expire after 24 hours; refresh tokens are long-lived (90+ days)
 - A 5-minute buffer is used when checking expiry to avoid edge cases
 - The `offline_access` scope is required for refresh token functionality
